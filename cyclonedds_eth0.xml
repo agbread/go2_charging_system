@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain id="0">
+    <General>
+      <Interfaces><NetworkInterface name="eth0" priority="100" multicast="true"/></Interfaces>
+      <!-- spdp = 디스커버리만 멀티캐스트, 데이터 unicast (Go2 내부망 멀티캐스트 데이터 배달 고장 회피 — lo.xml과 동일) -->
+      <AllowMulticast>spdp</AllowMulticast>
+    </General>
+    <Discovery>
+      <MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>
+    </Discovery>
+    <Internal><SocketReceiveBufferSize min="16MB"/></Internal>
+  </Domain>
+</CycloneDDS>
