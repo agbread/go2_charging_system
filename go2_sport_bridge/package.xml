@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>go2_sport_bridge</name>
+  <version>0.1.0</version>
+  <description>
+    Adapter bridging the ArUco docking pipeline to the Unitree Go2 built-in
+    (sport-mode) controller via unitree_sdk2. Translates /cmd_vel and /joy into
+    SportClient commands and republishes rt/lowstate as /joint_states and
+    /charging_state. No RL policy involved.
+  </description>
+  <maintainer email="enbang0209@gmail.com">agbread</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <!-- unitree_sdk2 is a non-ROS CMake package found under /opt/unitree_robotics -->
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

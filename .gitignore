@@ -1,0 +1,23 @@
+# ROS 2 / colcon build artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Claude / local tooling
+.claude/
+
+# Local backups / scratch
+.backup_*/
+*.bak
+*~
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
