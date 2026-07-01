@@ -108,19 +108,25 @@ class ArucoDockingControllerNode(Node):
         # instead of → 0), set this negative.
         self.declare_parameter('align_yaw_gain', 1.0)
 
-        # Camera mounting offset in base_link (assumes the optical axis is
-        # horizontal and parallel to base_link x — i.e. no pitch/tilt). The
-        # marker pose from the detector is in the camera OPTICAL frame
-        # (x=right, y=down, z=forward); we convert it to base_link distances:
-        #   base_link x (forward) = camera_offset_x + tvec.z
-        #   base_link y (left)    = camera_offset_y - tvec.x
-        # target_distance is then interpreted as the desired base_link-x range.
+        # Camera mounting in base_link. The marker pose from the detector is in
+        # the camera OPTICAL frame (x=right, y=down, z=forward). We convert it to
+        # base_link distances. With the camera pitched DOWN by camera_pitch_deg
+        # (rotation about base_link y), the forward distance is the projection:
+        #   base_link x (forward) = camera_offset_x + cosθ·tvec.z − sinθ·tvec.y
+        #   base_link y (left)    = camera_offset_y − tvec.x        (pitch-independent)
+        # camera_pitch_deg = 0 → bl_x = camera_offset_x + tvec.z (flat/forward).
+        # POSITIVE camera_pitch_deg = camera tilted DOWN (nose toward the ground).
+        # target_distance is interpreted as the desired base_link-x range.
         self.declare_parameter('camera_offset_x', 0.345)   # base_link→camera forward [m]
         self.declare_parameter('camera_offset_y', 0.0)     # base_link→camera left(+) [m]
+        self.declare_parameter('camera_pitch_deg', 0.0)    # down-tilt [deg], + = nose down
 
         self.target_dist          = self.get_parameter('target_distance').value
         self.cam_off_x            = self.get_parameter('camera_offset_x').value
         self.cam_off_y            = self.get_parameter('camera_offset_y').value
+        self.cam_pitch            = np.deg2rad(self.get_parameter('camera_pitch_deg').value)
+        self._cos_pitch           = float(np.cos(self.cam_pitch))
+        self._sin_pitch           = float(np.sin(self.cam_pitch))
         self.max_lin              = self.get_parameter('max_linear_x').value
         self.min_lin              = self.get_parameter('min_linear_x').value
         self.max_ang              = self.get_parameter('max_angular_z').value
@@ -401,7 +407,9 @@ class ArucoDockingControllerNode(Node):
         # `lateral` is kept as the camera-frame lateral error (= -bl_y) so the
         # existing steering signs are unchanged; it is 0 when base_link is
         # aligned with the marker (bl_y == 0).
-        bl_x    = self.cam_off_x + float(self.last_tvec[2])
+        bl_x    = (self.cam_off_x
+                   + self._cos_pitch * float(self.last_tvec[2])
+                   - self._sin_pitch * float(self.last_tvec[1]))
         lateral = float(self.last_tvec[0]) - self.cam_off_y
         bl_y    = -lateral
         err     = bl_x - self.target_dist
