@@ -9,12 +9,15 @@ aruco_detector_node:
 
 aruco_docking_controller_node:
   ros__parameters:
-    target_distance: 0.35        # camera→marker [m]: base_link 0.665m - camera offset 0.345m
-    max_linear_x: 0.10
+    target_distance: 0.665       # base_link x 기준 정지 거리 [m] (base_link→marker, x방향)
+    camera_offset_x: 0.345       # base_link→카메라 전방(x) 오프셋 [m]; bl_x = 0.345 + tvec.z
+    camera_offset_y: 0.0         # base_link→카메라 좌(+)/우(-) 오프셋 [m]; bl_y = 0.0 - tvec.x
+    max_linear_x: 0.20
+    min_linear_x: 0.20         # 최소 전진/후진 속도: Go2 데드존(≈0.15 미만은 안 움직임) 보정
     max_angular_z: 0.30
     Kp_linear: 0.50
     Kp_angular: 1.00
-    goal_tol_dist: 0.05
+    goal_tol_dist: 0.03
     goal_tol_lateral: 0.05
     marker_timeout_sec: 0.50
     cmd_vel_topic: /cmd_vel
@@ -33,7 +36,7 @@ aruco_docking_controller_node:
     standup_delay_sec: 14.0            # GetUp 애니메이션(~10-12s) 완료 대기 한계 (이후 강제 locomotion)
     locomotion_trigger_delay_sec: 3.0  # locomotion 진입 후 안정화 시간 (후진 전)
     backup_start_delay_sec: 4.0        # (재시도 로직에서 미사용; 호환성 위해 유지)
-    backup_speed: 0.10                 # 후진 속도 [m/s]
+    backup_speed: 0.20                 # 후진 속도 [m/s] (데드존 위로 올림)
     backup_max_sec: 15.0               # 마커 미발견 시 최대 후진 시간 [s]
     enable_charging_check: true
     # Sit detection via /joint_states

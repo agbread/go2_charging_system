@@ -52,6 +52,10 @@ class ArucoDockingControllerNode(Node):
         # ── parameters ──────────────────────────────────────────────────────
         self.declare_parameter('target_distance', 0.60)
         self.declare_parameter('max_linear_x', 0.20)
+        # Minimum forward/back speed floor: the Go2 sport controller has a
+        # velocity deadband, so commands below ~0.15 m/s barely move the robot.
+        # Any non-zero drive command is floored to this to avoid stuttering.
+        self.declare_parameter('min_linear_x', 0.15)
         self.declare_parameter('max_angular_z', 0.30)
         self.declare_parameter('Kp_linear', 0.5)
         self.declare_parameter('Kp_angular', 1.0)
@@ -104,8 +108,21 @@ class ArucoDockingControllerNode(Node):
         # instead of → 0), set this negative.
         self.declare_parameter('align_yaw_gain', 1.0)
 
+        # Camera mounting offset in base_link (assumes the optical axis is
+        # horizontal and parallel to base_link x — i.e. no pitch/tilt). The
+        # marker pose from the detector is in the camera OPTICAL frame
+        # (x=right, y=down, z=forward); we convert it to base_link distances:
+        #   base_link x (forward) = camera_offset_x + tvec.z
+        #   base_link y (left)    = camera_offset_y - tvec.x
+        # target_distance is then interpreted as the desired base_link-x range.
+        self.declare_parameter('camera_offset_x', 0.345)   # base_link→camera forward [m]
+        self.declare_parameter('camera_offset_y', 0.0)     # base_link→camera left(+) [m]
+
         self.target_dist          = self.get_parameter('target_distance').value
+        self.cam_off_x            = self.get_parameter('camera_offset_x').value
+        self.cam_off_y            = self.get_parameter('camera_offset_y').value
         self.max_lin              = self.get_parameter('max_linear_x').value
+        self.min_lin              = self.get_parameter('min_linear_x').value
         self.max_ang              = self.get_parameter('max_angular_z').value
         self.kp_lin               = self.get_parameter('Kp_linear').value
         self.kp_ang               = self.get_parameter('Kp_angular').value
@@ -222,8 +239,12 @@ class ArucoDockingControllerNode(Node):
             aruco_msg = String()
             aruco_msg.data = 'aruco_failed'
             self.aruco_state_pub.publish(aruco_msg)
-            self.get_logger().error('[aruco_state] aruco_failed — shutting down in 0.5 s')
-            self.create_timer(0.5, self._do_shutdown)
+            self.get_logger().error(
+                '[aruco_state] aruco_failed — standing up, then shutting down.')
+            # Drive GetUp from a clean state in _failed() (flags may be dirty
+            # from a prior RETRY_STANDUP). Shutdown happens once standing.
+            self.standup_sent      = False
+            self.standup_sent_time = None
         elif new_state == State.SETTLING:
             self.settle_stop_time = None
         elif new_state == State.RETRY_STANDUP:
@@ -236,6 +257,50 @@ class ArucoDockingControllerNode(Node):
         self._stop()
         self.get_logger().info('Aruco docking service terminated.')
         rclpy.shutdown()
+
+    def _failed(self):
+        """Docking failed: stand the robot up and leave it standing still, then
+        shut down. No locomotion trigger — we only get it off the pad to a
+        stable stand, we do not enable walking."""
+        elapsed = self._elapsed()
+
+        # ── Phase 0: wait for full sit, then send GetUp (A) ──────────────────
+        if not self.standup_sent:
+            if self._is_sitting():
+                self.get_logger().info('[FAILED] Full sit confirmed — standing up (A).')
+                self.joy_pub.publish(self._joy(1, 0))  # A → GetUp
+                self.standup_sent      = True
+                self.standup_sent_time = self.get_clock().now()
+            elif elapsed >= self.sit_confirm_timeout:
+                self.get_logger().warn(
+                    f'[FAILED] Full sit not confirmed after {elapsed:.1f}s — '
+                    'standing up anyway.')
+                self.joy_pub.publish(self._joy(1, 0))
+                self.standup_sent      = True
+                self.standup_sent_time = self.get_clock().now()
+            else:
+                self._stop()
+            return
+
+        # ── Phase 1: wait until actually standing, then hold stand + shutdown ─
+        since_getup = (self.get_clock().now() - self.standup_sent_time).nanoseconds * 1e-9
+        if self._is_standing():
+            self.get_logger().info(
+                f'[FAILED] ✓ Standing confirmed ({since_getup:.1f}s) — '
+                'holding stand, shutting down.')
+        elif since_getup >= self.standup_delay:
+            self.get_logger().warn(
+                f'[FAILED] Stand not confirmed after {since_getup:.1f}s — '
+                'shutting down anyway.')
+        else:
+            self.get_logger().info(
+                f'[FAILED] Standing up… ({since_getup:.1f}/{self.standup_delay:.0f}s)',
+                throttle_duration_sec=1.0)
+            self._stop()
+            return
+
+        # Robot is standing; leave it there and terminate the controller.
+        self._do_shutdown()
 
     def _joy(self, *buttons, axes=None) -> Joy:
         """Build a Joy message.
@@ -307,7 +372,7 @@ class ArucoDockingControllerNode(Node):
             State.CHECKING:      self._checking,
             State.RETRY_STANDUP: self._retry_standup,
             State.DONE:          self._stop,
-            State.FAILED:        self._stop,
+            State.FAILED:        self._failed,
         }[self.state]()
 
     # ── state handlers ────────────────────────────────────────────────────────
@@ -330,12 +395,19 @@ class ArucoDockingControllerNode(Node):
             self.cmd_pub.publish(cmd)
             return
 
-        depth   = float(self.last_tvec[2])
-        lateral = float(self.last_tvec[0])
-        err     = depth - self.target_dist
+        # Convert camera-optical tvec → base_link distances.
+        #   bl_x = forward distance base_link→marker (target = target_distance)
+        #   bl_y = left(+)/right(-) distance base_link→marker (target = 0)
+        # `lateral` is kept as the camera-frame lateral error (= -bl_y) so the
+        # existing steering signs are unchanged; it is 0 when base_link is
+        # aligned with the marker (bl_y == 0).
+        bl_x    = self.cam_off_x + float(self.last_tvec[2])
+        lateral = float(self.last_tvec[0]) - self.cam_off_y
+        bl_y    = -lateral
+        err     = bl_x - self.target_dist
 
         self.get_logger().info(
-            f'dist={depth:.3f}m  err={err:+.3f}m  lat={lateral:+.3f}m',
+            f'bl_x={bl_x:.3f}m  err={err:+.3f}m  bl_y={bl_y:+.3f}m',
             throttle_duration_sec=0.5)
 
         if abs(err) < self.tol_dist and abs(lateral) < self.tol_lat:
@@ -349,9 +421,9 @@ class ArucoDockingControllerNode(Node):
         #  target_distance and can never reach tolerance.)
         v = self.kp_lin * err
         if v >= 0.0:
-            cmd.linear.x = float(np.clip(v, 0.06, self.max_lin))
+            cmd.linear.x = float(np.clip(v, self.min_lin, self.max_lin))
         else:
-            cmd.linear.x = float(np.clip(v, -self.max_lin, -0.06))
+            cmd.linear.x = float(np.clip(v, -self.max_lin, -self.min_lin))
         cmd.angular.z = float(np.clip(-self.kp_ang * lateral, -self.max_ang, self.max_ang))
 
         self.get_logger().info(
@@ -398,7 +470,8 @@ class ArucoDockingControllerNode(Node):
             self._stop()
             return
 
-        lateral = float(self.last_tvec[0])
+        # camera-frame lateral error (= -base_link_y); 0 when base_link aligned.
+        lateral = float(self.last_tvec[0]) - self.cam_off_y
         qx, qy, qz, qw = self.last_quat
         heading_x = 2.0 * (qx * qz + qy * qw)  # R[0,2] — marker normal x in camera frame
 
@@ -410,8 +483,14 @@ class ArucoDockingControllerNode(Node):
         cmd.angular.z = float(np.clip(-self.align_yaw_gain * heading_x,
                                       -self.max_ang, self.max_ang))
         # Strafe to center the marker: lateral>0 (marker right) → move right (linear.y<0).
-        cmd.linear.y  = float(np.clip(-self.kp_lin * lateral,
-                                      -self.max_lin * 0.5, self.max_lin * 0.5))
+        # Apply the same min-speed floor as forward drive so the sideways step
+        # actually beats the Go2 velocity deadband; zero it once within tolerance
+        # to avoid oscillating around the center.
+        if lateral_ok:
+            cmd.linear.y = 0.0
+        else:
+            vy_mag = float(np.clip(self.kp_lin * abs(lateral), self.min_lin, self.max_lin))
+            cmd.linear.y = -vy_mag if lateral > 0.0 else vy_mag
         self.cmd_pub.publish(cmd)
 
         self.get_logger().info(
