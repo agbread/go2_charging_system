@@ -12,6 +12,7 @@ aruco_docking_controller_node:
     target_distance: 0.665       # base_link x 기준 정지 거리 [m] (base_link→marker, x방향)
     camera_offset_x: 0.345       # base_link→카메라 전방(x) 오프셋 [m]; bl_x = 0.345 + tvec.z
     camera_offset_y: 0.0         # base_link→카메라 좌(+)/우(-) 오프셋 [m]; bl_y = 0.0 - tvec.x
+    camera_pitch_deg: 0.0        # 카메라 아래 기울기 [deg], +가 nose-down. 나중에 실제 각도 입력 (0=지금과 동일)
     max_linear_x: 0.20
     min_linear_x: 0.20         # 최소 전진/후진 속도: Go2 데드존(≈0.15 미만은 안 움직임) 보정
     max_angular_z: 0.30
