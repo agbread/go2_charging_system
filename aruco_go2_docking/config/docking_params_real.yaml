@@ -19,7 +19,7 @@ aruco_docking_controller_node:
     Kp_linear: 0.50
     Kp_angular: 1.00
     goal_tol_dist: 0.03
-    goal_tol_lateral: 0.05
+    goal_tol_lateral: 0.03
     marker_timeout_sec: 0.50
     cmd_vel_topic: /cmd_vel
     marker_pose_topic: /aruco/marker_pose
@@ -52,3 +52,6 @@ aruco_docking_controller_node:
     heading_tol: 0.12                  # |R[0,2]| 임계값 (~6.9°); 이내면 heading 평행으로 간주
     settle_align_timeout_sec: 5.0      # settle_delay 이후 정렬에 허용하는 추가 시간 [s]
     align_yaw_gain: -1.0               # heading_x에 대한 yaw 게인 (오른쪽으로 더 틀어져서 부호 반전)
+    # 포즈 필터 (실기 카메라 노이즈용). 기본 OFF — 지터 심하면 켜기.
+    pose_filter_alpha: 1.0             # EMA: 1.0=off, 낮출수록 부드러움(지연↑). 예) 0.3
+    pose_outlier_dist: 0.0             # [m] 이보다 큰 점프 프레임 버림; 0=off. 예) 0.15

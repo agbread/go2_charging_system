@@ -3,46 +3,56 @@ aruco_detector_node:
     marker_id: 0
     marker_size: 0.173            # physical side length [m] (A4 출력 기준)
     aruco_dict: DICT_4X4_50
+    # ── SIM 전용 토픽 (실기는 /camera/color/...). 이것만 real과 다름. ──
     image_topic: /color/image_raw
     camera_info_topic: /color/camera_info
     publish_debug_image: true
 
 aruco_docking_controller_node:
   ros__parameters:
-    target_distance: 0.40         # camera→marker depth [m]; base_link→marker = 0.40 + 0.40 (cam offset) = 0.80 m
-    max_linear_x: 0.10            # [m/s]
-    max_angular_z: 0.30           # [rad/s]
+    target_distance: 0.665       # base_link x 기준 정지 거리 [m] (base_link→marker, x방향)
+    camera_offset_x: 0.345       # base_link→카메라 전방(x) 오프셋 [m]; bl_x = 0.345 + tvec.z
+    camera_offset_y: 0.0         # base_link→카메라 좌(+)/우(-) 오프셋 [m]; bl_y = 0.0 - tvec.x
+    camera_pitch_deg: 0.0        # 카메라 아래 기울기 [deg], +가 nose-down (0=지금과 동일)
+    max_linear_x: 0.20
+    min_linear_x: 0.20         # 최소 전진/후진 속도: Go2 데드존(≈0.15 미만은 안 움직임) 보정
+    max_angular_z: 0.30
     Kp_linear: 0.50
     Kp_angular: 1.00
-    goal_tol_dist: 0.05           # [m]
-    goal_tol_lateral: 0.05        # [m]
+    goal_tol_dist: 0.03
+    goal_tol_lateral: 0.03
     marker_timeout_sec: 0.50
     cmd_vel_topic: /cmd_vel
     marker_pose_topic: /aruco/marker_pose
     sit_on_arrival: true
     joy_topic: /joy
+    # Timing
     settle_delay_sec: 1.5
     pre_sit_stop_sec: 1.0          # 정렬 후 B 전에 cmd_vel=0으로 완전 정지 (damp 모드 미끄러짐 방지)
-    sit_confirm_timeout_sec: 10.0  # max wait for joint-state sit confirmation (fallback timer)
-    charge_check_delay_sec: 2.0     # wait AFTER sit confirmed before reading /charging_state
+    sit_confirm_timeout_sec: 20.0  # max wait for joint-state sit confirmation (GetDown ~10s on real)
+    charge_check_delay_sec: 3.0     # wait AFTER sit confirmed before reading /charging_state
     charge_detect_timeout_sec: 5.0  # max wait for first /charging_state message
     charge_wait_timeout_sec: 10.0   # 규격서: 약 10초간 충전 상태 유지 확인 (sustain duration)
-    max_retries: 2                  # 규격서: 3회 총 시도(초기 1회 + 재시도 2회)
-    standup_delay_sec: 14.0        # max wait for GetUp to finish (animation ~10-12s) before forcing loco
-    locomotion_trigger_delay_sec: 3.0  # stabilize time AFTER locomotion engages, before backup
-    backup_start_delay_sec: 4.0    # (unused by retry now; kept for compatibility)
-    backup_speed: 0.10
-    backup_max_sec: 10.0           # max backup time if marker never appears [s]
+    # Retry
+    max_retries: 2                 # 규격서: 3회 총 시도(초기 1회 + 재시도 2회)
+    standup_delay_sec: 14.0            # GetUp 애니메이션(~10-12s) 완료 대기 한계 (이후 강제 locomotion)
+    locomotion_trigger_delay_sec: 3.0  # locomotion 진입 후 안정화 시간 (후진 전)
+    backup_start_delay_sec: 4.0        # (재시도 로직에서 미사용; 호환성 위해 유지)
+    backup_speed: 0.20                 # 후진 속도 [m/s] (데드존 위로 올림)
+    backup_max_sec: 15.0               # 마커 미발견 시 최대 후진 시간 [s]
     enable_charging_check: true    # use mock_charging_node to simulate
     # Sit detection via /joint_states
     joint_states_topic: /joint_states
-    sit_thigh_target: 1.36         # [rad] b2/go2 sit pose
-    sit_calf_target: -2.65         # [rad]
-    sit_joint_tolerance: 0.15      # [rad]
-    # Stand detection via /joint_states (RETRY_STANDUP waits for this before locomotion)
-    stand_calf_target: -1.50       # [rad] calf angle when standing
-    stand_calf_tolerance: 0.50     # [rad]
-    # Heading alignment before sit (SETTLING phase) — sit collinear with marker normal
-    heading_tol: 0.12              # |R[0,2]| threshold (~6.9°) to consider heading parallel
-    settle_align_timeout_sec: 5.0  # extra seconds allowed for alignment after settle_delay
-    align_yaw_gain: -1.0           # yaw gain on heading_x (flipped: robot was twisting further right with +1.0)
+    sit_thigh_target: 1.36             # [rad] go2 sit pose (animation target)
+    sit_calf_target: -2.65             # [rad]
+    sit_joint_tolerance: 0.30          # [rad] wider: damp mode lets joints settle past target
+    # Stand detection via /joint_states (RETRY_STANDUP이 locomotion 전에 이걸 기다림)
+    stand_calf_target: -1.50           # [rad] 일어섰을 때 calf 각도
+    stand_calf_tolerance: 0.50         # [rad]
+    # Heading alignment before sit (SETTLING) — 마커 normal과 base_link x축 일직선으로 앉기
+    heading_tol: 0.12                  # |R[0,2]| 임계값 (~6.9°); 이내면 heading 평행으로 간주
+    settle_align_timeout_sec: 5.0      # settle_delay 이후 정렬에 허용하는 추가 시간 [s]
+    align_yaw_gain: -1.0               # heading_x에 대한 yaw 게인 (오른쪽으로 더 틀어져서 부호 반전)
+    # 포즈 필터 (실기 카메라 노이즈용). 기본 OFF — 지터 심하면 켜기.
+    pose_filter_alpha: 1.0             # EMA: 1.0=off, 낮출수록 부드러움(지연↑). 예) 0.3
+    pose_outlier_dist: 0.0             # [m] 이보다 큰 점프 프레임 버림; 0=off. 예) 0.15
