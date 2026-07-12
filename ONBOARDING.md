@@ -8,10 +8,10 @@ Unitree **Go2**의 ArUco 마커 기반 자율 충전(도킹) 시스템을 **새 
 - **`go2_sport_bridge`** (C++) — `/cmd_vel`·`/joy` ↔ SportClient 어댑터, `rt/lowstate` → `/joint_states`·`/charging_state`
 - **`aruco_go2_docking`** (Python) — 카메라 → ArUco 검출 → 도킹 상태머신
 
-> ⚠️ **가장 흔한 함정**: 이 시스템은 ROS 2가 **CycloneDDS**로 동작하고 환경변수
+> 이 시스템은 ROS 2가 **CycloneDDS**로 동작하고 환경변수
 > `CYCLONEDDS_URI`가 로봇 NIC(eth0)에 바인딩돼 있어야 합니다. 이게 빠지면
 > `sport_mode_adapter_node`가 `Failed to create domain explicitly`로 죽거나,
-> 로봇 토픽(`rt/lowstate`)을 못 받습니다. **4단계를 반드시 수행하세요.**
+> 로봇 토픽(`rt/lowstate`)을 못 받습니다. **4단계 반드시 수행**
 
 ---
 
@@ -68,9 +68,8 @@ mkdir -p ~/cyclonedds_ws/src && cd ~/cyclonedds_ws/src
 git clone -b 0.10.2 https://github.com/eclipse-cyclonedds/cyclonedds.git
 cd ~/cyclonedds_ws && colcon build
 ```
-> Humble 이상에서는 CycloneDDS 직접 컴파일 없이 `ros-<distro>-rmw-cyclonedds-cpp` 설치로 충분합니다.
 
-## 4. DDS 환경설정 ⚠️ (핵심)
+## 4. DDS 환경설정
 
 저장소에 포함된 **`cyclonedds_eth0.xml`**(도메인 0 / eth0 바인딩)을 홈으로 복사하고
 환경변수를 설정합니다.
@@ -133,7 +132,7 @@ source install/setup.bash
 
 ---
 
-## 7. 실제 로봇 보정 포인트 ⚠️
+## 7. 실제 로봇 보정 포인트 
 
 `aruco_go2_docking/config/docking_params_real.yaml`:
 - `marker_size` — 실제 출력한 ArUco 마커의 한 변 길이[m] (기본 0.173, A4 기준)
@@ -155,9 +154,3 @@ source install/setup.bash
 
 ---
 
-### 참고: 왜 `network_interface`를 SDK에 안 넘기나
-`sport_mode_adapter_node`는 `ChannelFactory::Init(0)`을 **인터페이스 인자 없이** 호출합니다.
-ROS 2가 이미 `CYCLONEDDS_URI`로 도메인 0을 eth0에 열어둔 상태라, SDK가 도메인을 **다시
-명시 생성**하면 CycloneDDS가 거부(`Failed to create domain explicitly`)하기 때문입니다.
-인터페이스 바인딩은 `cyclonedds_eth0.xml`(=env)이 전담합니다. launch의 `network_interface`
-인자는 호환성을 위해 남아있지만 SDK로 전달되지 않습니다.
