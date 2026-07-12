@@ -167,6 +167,7 @@ private:
         const auto &a = msg->axes;
         const bool A       = b.size() > 0 && b[0] != 0;
         const bool B       = b.size() > 1 && b[1] != 0;
+        const bool X       = b.size() > 2 && b[2] != 0;
         const bool RB      = b.size() > 5 && b[5] != 0;
         const bool dpad_up = a.size() > 7 && a[7] > 0.5f;
 
@@ -187,7 +188,15 @@ private:
             }
             return;
         }
-        if (A) {                                   // get up
+        if (X) {                                   // gentle get up (paired with StandDown)
+            if (fire("standup_soft")) {
+                RCLCPP_INFO(get_logger(), "[joy] X → StandUp (gentle get up)");
+                walking_enabled_ = false;
+                sport_->StandUp();
+            }
+            return;
+        }
+        if (A) {                                   // get up (forceful recovery, from any pose)
             if (fire("standup")) {
                 RCLCPP_INFO(get_logger(), "[joy] A → RecoveryStand (get up)");
                 // stay gated until the locomotion trigger so we don't auto-walk

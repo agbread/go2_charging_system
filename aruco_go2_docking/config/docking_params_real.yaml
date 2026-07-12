@@ -1,7 +1,7 @@
 aruco_detector_node:
   ros__parameters:
     marker_id: 0
-    marker_size: 0.173            # physical side length [m] (A4 출력 기준)
+    marker_size: 0.12            # physical side length [m] (A4 출력 기준)
     aruco_dict: DICT_4X4_50
     image_topic: /camera/color/image_raw
     camera_info_topic: /camera/color/camera_info
@@ -9,17 +9,20 @@ aruco_detector_node:
 
 aruco_docking_controller_node:
   ros__parameters:
-    target_distance: 0.665       # base_link x 기준 정지 거리 [m] (base_link→marker, x방향)
+    target_distance: 0.625       # base_link x 기준 정지 거리 [m] (base_link→marker, x방향)
     camera_offset_x: 0.345       # base_link→카메라 전방(x) 오프셋 [m]; bl_x = 0.345 + tvec.z
     camera_offset_y: 0.0         # base_link→카메라 좌(+)/우(-) 오프셋 [m]; bl_y = 0.0 - tvec.x
     camera_pitch_deg: 0.0        # 카메라 아래 기울기 [deg], +가 nose-down. 나중에 실제 각도 입력 (0=지금과 동일)
-    max_linear_x: 0.20
+    max_linear_x: 0.25
     min_linear_x: 0.20         # 최소 전진/후진 속도: Go2 데드존(≈0.15 미만은 안 움직임) 보정
-    max_angular_z: 0.30
+    max_angular_z: 0.20        # ④ 겹침 진동 완화 위해 하향 (was 0.30)
+    min_angular_z: 0.1        # heading 정렬 yaw 최소 명령: 데드존(≈0.15) 아래 스톨 방지. 0=끄기
     Kp_linear: 0.50
-    Kp_angular: 1.00
+    Kp_angular: 0.70           # ④ yaw 게인 하향 (was 1.00)
     goal_tol_dist: 0.03
-    goal_tol_lateral: 0.05
+    goal_tol_lateral: 0.06     # ① strafe 진동(지그재그) 완화 위해 넓힘 (was 0.03)
+    # ③ DOCKING 중심 근처(|x_m|<이 값)에선 strafe/yaw를 동시에 안 하고 순차 정렬 → fishtail 방지
+    docking_yaw_release_lat: 0.10
     marker_timeout_sec: 0.50
     cmd_vel_topic: /cmd_vel
     marker_pose_topic: /aruco/marker_pose
@@ -49,6 +52,9 @@ aruco_docking_controller_node:
     stand_calf_target: -1.50           # [rad] 일어섰을 때 calf 각도
     stand_calf_tolerance: 0.50         # [rad]
     # Heading alignment before sit (SETTLING) — 마커 normal과 base_link x축 일직선으로 앉기
-    heading_tol: 0.12                  # |R[0,2]| 임계값 (~6.9°); 이내면 heading 평행으로 간주
+    heading_tol: 0.14                 # |R[0,2]| 임계값 (~6.9°); 이내면 heading 평행으로 간주
     settle_align_timeout_sec: 5.0      # settle_delay 이후 정렬에 허용하는 추가 시간 [s]
     align_yaw_gain: -1.0               # heading_x에 대한 yaw 게인 (오른쪽으로 더 틀어져서 부호 반전)
+    # 포즈 필터 (실기 카메라 노이즈용). 기본 OFF — 지터 심하면 켜기.
+    pose_filter_alpha: 1.0             # EMA: 1.0=off, 낮출수록 부드러움(지연↑). 예) 0.3
+    pose_outlier_dist: 0.0             # [m] 이보다 큰 점프 프레임 버림; 0=off. 예) 0.15

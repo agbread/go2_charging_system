@@ -8,9 +8,12 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# unitree_sdk2 is installed by Unitree's install.sh under /opt/unitree_robotics.
-# Add it to the search path so find_package() locates unitree_sdk2Config.cmake.
+# Locate unitree_sdk2Config.cmake. Search Unitree's install.sh default
+# (/opt/unitree_robotics) plus the SDK bundled with rl_sar (where it actually
+# lives on this Go2). Override at build time with -Dunitree_sdk2_DIR=... if it
+# is installed somewhere else.
 list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics")
+list(APPEND CMAKE_PREFIX_PATH "$ENV{HOME}/rl_sar/install")
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)

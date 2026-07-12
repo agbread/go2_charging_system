@@ -57,6 +57,10 @@ class ArucoDockingControllerNode(Node):
         # Any non-zero drive command is floored to this to avoid stuttering.
         self.declare_parameter('min_linear_x', 0.15)
         self.declare_parameter('max_angular_z', 0.30)
+        # Heading 정렬용 yaw 최소 명령 바닥 [rad/s]: Go2 데드존(≈0.15 미만 무시) 탓에
+        # heading 오차가 작으면 명령이 데드존 아래로 떨어져 회전이 멈추는 스톨 방지.
+        # 0 = 끄기. SETTLING ROT / DOCKING 근거리 순차정렬에만 적용.
+        self.declare_parameter('min_angular_z', 0.0)
         self.declare_parameter('Kp_linear', 0.5)
         self.declare_parameter('Kp_angular', 1.0)
         self.declare_parameter('goal_tol_dist', 0.05)
@@ -107,6 +111,12 @@ class ArucoDockingControllerNode(Node):
         # If the robot rotates the WRONG way during settling (heading_x grows
         # instead of → 0), set this negative.
         self.declare_parameter('align_yaw_gain', 1.0)
+        # DOCKING: below this |x_m| the approach decouples strafe/yaw (sequential
+        # heading-then-strafe) to stop the near-center fishtail zigzag.
+        self.declare_parameter('docking_yaw_release_lat', 0.10)
+        # Pose filter for noisy real-camera marker detection. OFF by default.
+        self.declare_parameter('pose_filter_alpha', 1.0)   # EMA: 1.0=off, lower=smoother (more lag)
+        self.declare_parameter('pose_outlier_dist', 0.0)   # [m] reject frames jumping > this; 0=off
 
         # Camera mounting in base_link. The marker pose from the detector is in
         # the camera OPTICAL frame (x=right, y=down, z=forward). We convert it to
@@ -130,6 +140,7 @@ class ArucoDockingControllerNode(Node):
         self.max_lin              = self.get_parameter('max_linear_x').value
         self.min_lin              = self.get_parameter('min_linear_x').value
         self.max_ang              = self.get_parameter('max_angular_z').value
+        self.min_ang              = self.get_parameter('min_angular_z').value
         self.kp_lin               = self.get_parameter('Kp_linear').value
         self.kp_ang               = self.get_parameter('Kp_angular').value
         self.tol_dist             = self.get_parameter('goal_tol_dist').value
@@ -157,6 +168,9 @@ class ArucoDockingControllerNode(Node):
         self.heading_tol          = self.get_parameter('heading_tol').value
         self.settle_align_timeout = self.get_parameter('settle_align_timeout_sec').value
         self.align_yaw_gain       = self.get_parameter('align_yaw_gain').value
+        self.yaw_release_lat      = self.get_parameter('docking_yaw_release_lat').value
+        self.pose_filter_alpha    = self.get_parameter('pose_filter_alpha').value
+        self.pose_outlier_dist    = self.get_parameter('pose_outlier_dist').value
         cmd_vel_topic      = self.get_parameter('cmd_vel_topic').value
         pose_topic         = self.get_parameter('marker_pose_topic').value
         joy_topic          = self.get_parameter('joy_topic').value
@@ -168,6 +182,9 @@ class ArucoDockingControllerNode(Node):
         self.last_marker_time   = None
         self.last_tvec          = None
         self.last_quat          = None   # (qx, qy, qz, qw) for heading alignment
+        self._pose_filt         = None   # EMA state [z_m, x_m, heading_x]
+        self._pose_filt_time    = None
+        self._pose_reject       = 0
         self.last_charging      = None
         self.retry_count        = 0
         self.loco_sent          = False
@@ -270,18 +287,18 @@ class ArucoDockingControllerNode(Node):
         stable stand, we do not enable walking."""
         elapsed = self._elapsed()
 
-        # ── Phase 0: wait for full sit, then send GetUp (A) ──────────────────
+        # ── Phase 0: wait for full sit, then send GetUp (A → RecoveryStand).
         if not self.standup_sent:
             if self._is_sitting():
                 self.get_logger().info('[FAILED] Full sit confirmed — standing up (A).')
-                self.joy_pub.publish(self._joy(1, 0))  # A → GetUp
+                self.joy_pub.publish(self._joy(1, 0))  # A → RecoveryStand
                 self.standup_sent      = True
                 self.standup_sent_time = self.get_clock().now()
             elif elapsed >= self.sit_confirm_timeout:
                 self.get_logger().warn(
                     f'[FAILED] Full sit not confirmed after {elapsed:.1f}s — '
                     'standing up anyway.')
-                self.joy_pub.publish(self._joy(1, 0))
+                self.joy_pub.publish(self._joy(1, 0))  # A → RecoveryStand
                 self.standup_sent      = True
                 self.standup_sent_time = self.get_clock().now()
             else:
@@ -332,6 +349,78 @@ class ArucoDockingControllerNode(Node):
             return False
         age = (self.get_clock().now() - self.last_marker_time).nanoseconds * 1e-9
         return age < self.timeout
+
+    def _marker_frame_pose(self):
+        """Base_link pose in the FIXED marker frame (angle-invariant).
+
+        Returns (z_m, x_m, heading_x, heading_deg) or None if no marker yet.
+          z_m       : base_link distance along the marker normal (forward range)
+          x_m       : base_link lateral offset along the marker x-axis (0 = centerline)
+          heading_x : R[0,2]; 0 ⇒ base_link x-axis parallel to the marker normal
+          heading_deg = asin(heading_x) in degrees
+
+        solvePnP gives the marker pose in the camera optical frame (R, t). The
+        camera origin in the marker frame is -Rᵀ·t; base_link sits camera_offset
+        behind the camera, so that offset is transformed in too. Because these are
+        POSITIONS in the fixed marker frame, they do NOT change when the robot
+        merely rotates — unlike the raw camera-frame tvec.x / tvec.z.
+        """
+        if self.last_tvec is None or self.last_quat is None:
+            return None
+        tx, ty, tz = (float(v) for v in self.last_tvec)
+        qx, qy, qz, qw = self.last_quat
+        # rotation matrix (marker→camera): column 0 (marker x) and column 2 (normal)
+        r00 = 1.0 - 2.0*(qy*qy + qz*qz); r10 = 2.0*(qx*qy + qz*qw); r20 = 2.0*(qx*qz - qy*qw)
+        r02 = 2.0*(qx*qz + qy*qw);       r12 = 2.0*(qy*qz - qx*qw); r22 = 1.0 - 2.0*(qx*qx + qy*qy)
+        # camera origin in marker frame = -Rᵀ·t
+        z_cam = -(r02*tx + r12*ty + r22*tz)
+        x_cam = -(r00*tx + r10*ty + r20*tz)
+        # shift camera→base_link: base_link at (cam_off_y, 0, -cam_off_x) in optical coords
+        ox, oy = self.cam_off_x, self.cam_off_y
+        z_m = z_cam + (r02*oy - r22*ox)
+        x_m = x_cam + (r00*oy - r20*ox)
+        heading_x = r02
+        z_m, x_m, heading_x = self._filter_pose(z_m, x_m, heading_x)
+        heading_deg = float(np.degrees(np.arcsin(float(np.clip(heading_x, -1.0, 1.0)))))
+        return z_m, x_m, heading_x, heading_deg
+
+    def _filter_pose(self, z_m, x_m, heading_x):
+        """Optional EMA smoothing + outlier rejection for a noisy real camera.
+        Disabled by default (pose_filter_alpha=1.0, pose_outlier_dist=0.0): returns
+        the raw values untouched. Re-seeds after a >0.5 s gap (marker was lost)."""
+        a = self.pose_filter_alpha
+        if a >= 1.0 and self.pose_outlier_dist <= 0.0:
+            return z_m, x_m, heading_x                      # filtering fully OFF
+        now = self.get_clock().now()
+        gap = (self._pose_filt_time is None or
+               (now - self._pose_filt_time).nanoseconds * 1e-9 > 0.5)
+        self._pose_filt_time = now
+        if gap or self._pose_filt is None:
+            self._pose_filt = [z_m, x_m, heading_x]         # (re)seed after gap / first sample
+            self._pose_reject = 0
+            return z_m, x_m, heading_x
+        fz, fx, fh = self._pose_filt
+        # reject a single wild jump (keep last estimate); force-accept after 10 in a row
+        if self.pose_outlier_dist > 0.0:
+            jump = max(abs(z_m - fz), abs(x_m - fx))
+            if jump > self.pose_outlier_dist and self._pose_reject < 10:
+                self._pose_reject += 1
+                return fz, fx, fh
+        self._pose_reject = 0
+        fz = a * z_m + (1.0 - a) * fz
+        fx = a * x_m + (1.0 - a) * fx
+        fh = a * heading_x + (1.0 - a) * fh
+        self._pose_filt = [fz, fx, fh]
+        return fz, fx, fh
+
+    def _yaw_align_cmd(self, heading_x: float) -> float:
+        """Heading 정렬용 yaw 명령. min_angular_z 바닥 적용: 명령이 Go2 데드존
+        아래로 떨어져 tol 바로 밖에서 회전이 멈추는 스톨을 막는다."""
+        w = float(np.clip(-self.align_yaw_gain * heading_x,
+                          -self.max_ang, self.max_ang))
+        if self.min_ang > 0.0 and 0.0 < abs(w) < self.min_ang:
+            w = self.min_ang if w > 0.0 else -self.min_ang
+        return w
 
     def _is_sitting(self) -> bool:
         """True when joint_states confirm the robot is fully in the sit pose."""
@@ -401,41 +490,71 @@ class ArucoDockingControllerNode(Node):
             self.cmd_pub.publish(cmd)
             return
 
-        # Convert camera-optical tvec → base_link distances.
-        #   bl_x = forward distance base_link→marker (target = target_distance)
-        #   bl_y = left(+)/right(-) distance base_link→marker (target = 0)
-        # `lateral` is kept as the camera-frame lateral error (= -bl_y) so the
-        # existing steering signs are unchanged; it is 0 when base_link is
-        # aligned with the marker (bl_y == 0).
-        bl_x    = (self.cam_off_x
-                   + self._cos_pitch * float(self.last_tvec[2])
-                   - self._sin_pitch * float(self.last_tvec[1]))
-        lateral = float(self.last_tvec[0]) - self.cam_off_y
-        bl_y    = -lateral
+        # Robot pose in the FIXED marker frame (angle-invariant). Distance is now
+        # measured along the marker NORMAL (z_m), not the camera optical axis, so an
+        # oblique approach no longer misreads distance. `lateral` is kept as the
+        # camera-frame value ONLY for DOCKING steering (yaw to face the marker →
+        # keeps it inside the camera FOV during the coarse approach).
+        mf = self._marker_frame_pose()
+        if mf is None:
+            self.cmd_pub.publish(cmd)
+            return
+        z_m, x_m, heading_x, heading_deg = mf
+        bl_x    = z_m                                        # base_link→marker along normal
         err     = bl_x - self.target_dist
+        lateral = float(self.last_tvec[0]) - self.cam_off_y  # camera-frame (steer/FOV only)
 
         self.get_logger().info(
-            f'bl_x={bl_x:.3f}m  err={err:+.3f}m  bl_y={bl_y:+.3f}m',
+            f'z_m={z_m:.3f}m  err={err:+.3f}m  x_m={x_m:+.3f}m  '
+            f'cam_lat={lateral:+.3f}m  heading={heading_deg:+.1f}°',
             throttle_duration_sec=0.5)
 
-        if abs(err) < self.tol_dist and abs(lateral) < self.tol_lat:
-            self.get_logger().info('Target reached — settling.')
+        # Arrive already aligned: require target range AND on the marker centerline
+        # (x_m ≈ 0) AND square to the marker normal (heading_x ≈ 0) before handing
+        # off to SETTLING. Without the heading gate the robot can satisfy distance
+        # while yawed ("얼굴만 앞으로") and then sit crooked → charging contacts miss.
+        heading_ok = abs(heading_x) < self.heading_tol
+        if abs(err) < self.tol_dist and abs(x_m) < self.tol_lat and heading_ok:
+            self.get_logger().info('Target reached (centered & square) — settling.')
             self._stop()
             self._enter(State.SETTLING)
             return
 
-        # Bidirectional: drive forward if too far, reverse if too close.
-        # (Pure forward-only logic strands the robot when it sits closer than
-        #  target_distance and can never reach tolerance.)
-        v = self.kp_lin * err
-        if v >= 0.0:
-            cmd.linear.x = float(np.clip(v, self.min_lin, self.max_lin))
+        # Forward/back on the marker-normal range (z_m → target). Zero within
+        # tolerance so the robot HOLDS distance (no forward/back jitter) while it
+        # is still strafing to center — otherwise the min-speed floor would make
+        # it bang-bang past the target.
+        if abs(err) < self.tol_dist:
+            cmd.linear.x = 0.0
         else:
-            cmd.linear.x = float(np.clip(v, -self.max_lin, -self.min_lin))
-        cmd.angular.z = float(np.clip(-self.kp_ang * lateral, -self.max_ang, self.max_ang))
+            v = self.kp_lin * err
+            cmd.linear.x = (float(np.clip(v, self.min_lin, self.max_lin)) if v >= 0.0
+                            else float(np.clip(v, -self.max_lin, -self.min_lin)))
+        # ③ Decouple strafe vs yaw NEAR the centerline to stop the fishtail zigzag.
+        # FAR (|x_m| ≥ yaw_release_lat): coupled approach is fine — yaw keeps the
+        #   marker in the camera FOV while strafing toward center.
+        # NEAR (|x_m| < yaw_release_lat): sequential like SETTLING — square the
+        #   heading FIRST (no strafe), then strafe to fine-center (no yaw). Never
+        #   both at once, so they can't fight and oscillate.
+        if abs(x_m) >= self.yaw_release_lat:
+            vy_mag = float(np.clip(self.kp_lin * abs(x_m), self.min_lin, self.max_lin))
+            cmd.linear.y = vy_mag if x_m > 0.0 else -vy_mag
+            cmd.angular.z = float(np.clip(-self.kp_ang * lateral, -self.max_ang, self.max_ang))
+        elif abs(heading_x) >= self.heading_tol:
+            # Phase 1 (near): rotate to square up; hold strafe at 0.
+            cmd.angular.z = self._yaw_align_cmd(heading_x)
+            cmd.linear.y = 0.0
+        else:
+            # Phase 2 (near): heading square → strafe to center; hold yaw at 0.
+            cmd.angular.z = 0.0
+            if abs(x_m) < self.tol_lat:
+                cmd.linear.y = 0.0
+            else:
+                vy_mag = float(np.clip(self.kp_lin * abs(x_m), self.min_lin, self.max_lin))
+                cmd.linear.y = vy_mag if x_m > 0.0 else -vy_mag
 
         self.get_logger().info(
-            f'cmd  v={cmd.linear.x:.2f}  w={cmd.angular.z:.2f}',
+            f'cmd  vx={cmd.linear.x:.2f}  vy={cmd.linear.y:.2f}  w={cmd.angular.z:.2f}',
             throttle_duration_sec=0.5)
         self.cmd_pub.publish(cmd)
 
@@ -478,48 +597,70 @@ class ArucoDockingControllerNode(Node):
             self._stop()
             return
 
-        # camera-frame lateral error (= -base_link_y); 0 when base_link aligned.
-        lateral = float(self.last_tvec[0]) - self.cam_off_y
-        qx, qy, qz, qw = self.last_quat
-        heading_x = 2.0 * (qx * qz + qy * qw)  # R[0,2] — marker normal x in camera frame
+        # ── Angle-invariant alignment in the FIXED marker frame ──────────────
+        mf = self._marker_frame_pose()
+        if mf is None:
+            self._stop()
+            return
+        z_m, x_m, heading_x, heading_deg = mf
+        dist_err = z_m - self.target_dist
 
         heading_ok = abs(heading_x) < self.heading_tol
-        lateral_ok = abs(lateral)   < self.tol_lat
+        lateral_ok = abs(x_m)       < self.tol_lat
+        dist_ok    = abs(dist_err)  < self.tol_dist
 
         cmd = Twist()
-        # Rotate to make heading parallel to the marker normal (fixes head twist).
-        cmd.angular.z = float(np.clip(-self.align_yaw_gain * heading_x,
-                                      -self.max_ang, self.max_ang))
-        # Strafe to center the marker: lateral>0 (marker right) → move right (linear.y<0).
-        # Apply the same min-speed floor as forward drive so the sideways step
-        # actually beats the Go2 velocity deadband; zero it once within tolerance
-        # to avoid oscillating around the center.
-        if lateral_ok:
-            cmd.linear.y = 0.0
+        # Hold the forward range along the marker normal (z_m → target) throughout
+        # both sub-phases. Measuring along the normal removes the oblique-approach
+        # cos(φ) error.
+        if dist_ok:
+            cmd.linear.x = 0.0
         else:
-            vy_mag = float(np.clip(self.kp_lin * abs(lateral), self.min_lin, self.max_lin))
-            cmd.linear.y = -vy_mag if lateral > 0.0 else vy_mag
+            v = self.kp_lin * dist_err
+            cmd.linear.x = (float(np.clip(v, self.min_lin, self.max_lin)) if v > 0.0
+                            else float(np.clip(v, -self.max_lin, -self.min_lin)))
+
+        # SEQUENTIAL: align HEADING first, THEN strafe to center. Once the robot is
+        # perpendicular, base_link-y is parallel to the marker x-axis so the strafe
+        # is a PURE lateral move (no distance coupling). Re-checked every tick, so if
+        # heading drifts back out it rotates again before resuming the strafe.
+        if not heading_ok:
+            # Phase 1 — rotate to square up to the marker normal; no strafe yet.
+            cmd.angular.z = self._yaw_align_cmd(heading_x)
+            cmd.linear.y = 0.0
+            phase = 'ROT'
+        else:
+            # Phase 2 — heading aligned → strafe onto the marker centerline.
+            # (x_m>0 ⇒ robot on the marker's right ⇒ strafe LEFT, linear.y>0.)
+            cmd.angular.z = 0.0
+            if lateral_ok:
+                cmd.linear.y = 0.0
+            else:
+                vy_mag = float(np.clip(self.kp_lin * abs(x_m), self.min_lin, self.max_lin))
+                cmd.linear.y = vy_mag if x_m > 0.0 else -vy_mag
+            phase = 'CENTER'
         self.cmd_pub.publish(cmd)
 
         self.get_logger().info(
-            f'Settling… lateral={lateral:+.3f}m[{"OK" if lateral_ok else ".."}]  '
-            f'heading_x={heading_x:+.3f}[{"OK" if heading_ok else ".."}]  ({elapsed:.1f}s)',
+            f'Settling[{phase}]… z_m={z_m:.3f}m[{"OK" if dist_ok else ".."}] '
+            f'x_m={x_m:+.3f}m[{"OK" if lateral_ok else ".."}] '
+            f'heading={heading_deg:+.1f}°[{"OK" if heading_ok else ".."}] ({elapsed:.1f}s)',
             throttle_duration_sec=0.5)
 
         # Proceed once settle_delay elapsed AND aligned (or alignment timeout)
         if elapsed < self.settle_delay:
             return
-        aligned = heading_ok and lateral_ok
+        aligned = heading_ok and lateral_ok and dist_ok
         if not aligned and elapsed < self.settle_delay + self.settle_align_timeout:
             return
         if not aligned:
             self.get_logger().warn(
-                f'Alignment timeout (heading_x={heading_x:+.3f}, lateral={lateral:+.3f}) '
-                '— sitting anyway.')
+                f'Alignment timeout (z_m={z_m:.3f}, x_m={x_m:+.3f}, '
+                f'heading={heading_deg:+.1f}°) — sitting anyway.')
 
         # Begin the pre-sit full-stop dwell (handled at the top of subsequent ticks).
         self.get_logger().info(
-            f'Aligned (x-axis collinear with marker) — full-stopping {self.pre_sit_stop:.1f}s before sit.')
+            f'Aligned in marker frame — full-stopping {self.pre_sit_stop:.1f}s before sit.')
         self.settle_stop_time = self.get_clock().now()
         self._stop()
 
@@ -645,17 +786,20 @@ class ArucoDockingControllerNode(Node):
     def _retry_standup(self):
         elapsed = self._elapsed()
 
-        # ── Phase 0: wait for robot to be fully sitting, then send GetUp ─────
+        # ── Phase 0: wait for robot to be fully sitting, then send GetUp.
+        # Uses A → RecoveryStand: StandUp leaves the robot in a pose where
+        # locomotion/Move won't engage (it stands but won't walk/back up), so
+        # RecoveryStand is required here to reach a locomotion-ready state.
         if not self.standup_sent:
             if self._is_sitting():
                 self.get_logger().info('Full sit confirmed — sending GetUp (A).')
-                self.joy_pub.publish(self._joy(1, 0))  # A → GetUp
+                self.joy_pub.publish(self._joy(1, 0))  # A → RecoveryStand
                 self.standup_sent      = True
                 self.standup_sent_time = self.get_clock().now()
             elif elapsed >= self.sit_confirm_timeout:
                 self.get_logger().warn(
                     f'Full sit not confirmed after {elapsed:.1f}s — sending GetUp anyway.')
-                self.joy_pub.publish(self._joy(1, 0))
+                self.joy_pub.publish(self._joy(1, 0))  # A → RecoveryStand
                 self.standup_sent      = True
                 self.standup_sent_time = self.get_clock().now()
             else:
