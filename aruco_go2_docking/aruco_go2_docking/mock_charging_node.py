@@ -25,7 +25,7 @@ class MockChargingNode(Node):
         super().__init__('mock_charging_node')
         self.declare_parameter('charging_success', False)
 
-        self._active = False  # publish only after aruco_arrive
+        self._active = False  
 
         self.pub = self.create_publisher(String, '/charging_state', 10)
         self.create_subscription(String, '/aruco_state',
