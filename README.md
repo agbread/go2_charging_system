@@ -12,7 +12,7 @@ Unitree **Go2**의 ArUco 마커 기반 **자율 충전(도킹) 시스템**.
  (상위 앱 알림)             │ /cmd_vel · /joy
                             ▼
       ┌── 시뮬: rl_sar (RL 보행 정책)
-      └── 실기: go2_sport_bridge ──► unitree_sdk2 SportClient (내장 sport-mode 제어기)
+      └── 실제 로봇: go2_sport_bridge ──► unitree_sdk2 SportClient (내장 sport-mode 제어기)
                      ▲
                 rt/lowstate ──► /joint_states · /charging_state (BMS)
 ```
@@ -22,33 +22,39 @@ Unitree **Go2**의 ArUco 마커 기반 **자율 충전(도킹) 시스템**.
 | 패키지 | 언어 | 역할 |
 |---|---|---|
 | [`aruco_go2_docking`](aruco_go2_docking/README.md) | Python | 도킹 "두뇌": ArUco 마커 검출 + 도킹 상태머신(접근→정렬→앉기→충전 확인→재시도) + 시뮬용 mock 충전 노드 |
-| [`go2_sport_bridge`](go2_sport_bridge/README.md) | C++ | 실기 어댑터: `/cmd_vel`·`/joy` ↔ SportClient 번역, `rt/lowstate` → `/joint_states`·`/charging_state`. RL 정책 불필요 |
+| [`go2_sport_bridge`](go2_sport_bridge/README.md) | C++ | 실제 로봇 어댑터: `/cmd_vel`·`/joy` ↔ SportClient 번역, `rt/lowstate` → `/joint_states`·`/charging_state`. RL 정책 불필요 |
 
 ## 빠른 실행
 
 ### 시뮬레이션 (Gazebo)
 
+터미널 3개를 열고 순서대로 실행합니다:
+
 ```bash
-# T1: Gazebo 환경 + 로봇
+# 터미널 1: Gazebo 환경 + 로봇
 ros2 launch aruco_go2_docking aruco_docking_sim.launch.py rname:=go2
-# T2: RL 로코모션
+# 터미널 2: RL 로코모션 (rl_sar — 아래 참고)
 ros2 run rl_sar rl_sim
-# T3: 도킹 노드 + mock 충전
+# 터미널 3: 도킹 노드 + mock 충전
 ros2 launch aruco_go2_docking aruco_docking.launch.py
-# 충전 성공 시뮬레이션
+# 충전 성공 시뮬레이션 (아무 터미널에서나)
 ros2 param set /mock_charging_node charging_success true
 ```
 
-### 실기 (Go2 내장 sport-mode 제어기)
+> `rl_sar`(RL 보행 컨트롤러)와 `go2_description`은 이 저장소에 포함되어 있지 않습니다.
+> [RCILab/RCI_quadruped_robot_navigation](https://github.com/RCILab/RCI_quadruped_robot_navigation)
+> 저장소를 같은 워크스페이스(`~/ros2_ws/src`)에 받아 함께 빌드한 뒤 실행하면 됩니다.
+
+### 실제 로봇 (Go2 내장 sport-mode 제어기)
 
 ```bash
-# T1: RealSense 카메라
+# 터미널 1: RealSense 카메라
 ros2 launch realsense2_camera rs_launch.py
-# T2: 도킹 전체 (어댑터 + detector + controller) — 완료 시 자동 종료
+# 터미널 2: 도킹 전체 (어댑터 + detector + controller) — 완료 시 자동 종료
 ros2 launch go2_sport_bridge go2_native_docking.launch.py network_interface:=eth0
 ```
 
-> ※ 실기는 CycloneDDS 환경설정(`RMW_IMPLEMENTATION`, `CYCLONEDDS_URI`)이 필수입니다.
+> ※ 실제 로봇은 CycloneDDS 환경설정(`RMW_IMPLEMENTATION`, `CYCLONEDDS_URI`)이 필수입니다.
 > 누락 시 어댑터가 `Failed to create domain explicitly`로 즉시 죽습니다 — [ONBOARDING.md](ONBOARDING.md) 4장 참고.
 
 ## `/aruco_state` 상태 알림 (연동 규격)

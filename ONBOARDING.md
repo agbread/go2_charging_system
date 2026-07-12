@@ -24,7 +24,7 @@ Unitree **Go2**의 ArUco 마커 기반 자율 충전(도킹) 시스템을 **새 
 | DDS | **CycloneDDS 0.10.2** (Foxy는 직접 컴파일 필요) |
 | Unitree SDK | **unitree_sdk2** (`/usr/local` 또는 `/opt/unitree_robotics`) |
 | 카메라 | RealSense (`realsense2_camera`) |
-| 로봇 모드 | **sport(고수준) 모드** — 공장 보행 제어기 활성 |
+| 로봇 모드 | **sport(고수준) 모드** — 내장 보행 제어기 활성 |
 
 ---
 
@@ -133,7 +133,7 @@ source install/setup.bash
 
 ---
 
-## 7. 실기 보정 포인트 ⚠️
+## 7. 실제 로봇 보정 포인트 ⚠️
 
 `aruco_go2_docking/config/docking_params_real.yaml`:
 - `marker_size` — 실제 출력한 ArUco 마커의 한 변 길이[m] (기본 0.173, A4 기준)
