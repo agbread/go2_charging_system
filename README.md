@@ -48,7 +48,7 @@ ros2 launch realsense2_camera rs_launch.py
 ros2 launch go2_sport_bridge go2_native_docking.launch.py network_interface:=eth0
 ```
 
-> ⚠️ 실기는 CycloneDDS 환경설정(`RMW_IMPLEMENTATION`, `CYCLONEDDS_URI`)이 필수입니다.
+> ※ 실기는 CycloneDDS 환경설정(`RMW_IMPLEMENTATION`, `CYCLONEDDS_URI`)이 필수입니다.
 > 누락 시 어댑터가 `Failed to create domain explicitly`로 즉시 죽습니다 — [ONBOARDING.md](ONBOARDING.md) 4장 참고.
 
 ## `/aruco_state` 상태 알림 (연동 규격)
