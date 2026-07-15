@@ -53,9 +53,22 @@ ros2 launch realsense2_camera rs_launch.py
 # 도킹 전체 (어댑터 + detector + controller) — 완료 시 자동 종료
 ros2 launch go2_sport_bridge go2_native_docking.launch.py network_interface:=eth0
 ```
-
 > ※ 실제 로봇은 CycloneDDS 환경설정(`RMW_IMPLEMENTATION`, `CYCLONEDDS_URI`)이 필수입니다.
 > 누락 시 어댑터가 `Failed to create domain explicitly`로 즉시 죽습니다 — [ONBOARDING.md](ONBOARDING.md) 4장 참고.
+
+### 실제 로봇 (강화학습 제어기)
+
+```bash
+# RealSense 카메라
+ros2 launch realsense2_camera rs_launch.py
+# RL 로코모션 (rl_sar)
+ros2 run rl_sar rl_real_go2 eth0
+# 도킹 전체 (detector + controller) — 완료 시 자동 종료
+ros2 launch aruco_go2_docking aruco_docking_real.launch.py 
+```
+> `rl_sar`(RL 보행 컨트롤러)와 `go2_description`은 이 저장소에 포함되어 있지 않습니다.
+> [fan-ziqi/rl_sar](https://github.com/fan-ziqi/rl_sar)
+> 저장소를 Go2 로봇에 받아 빌드한 뒤 실행하면 됩니다. 자세한 제어기 실행 방법은 저장소를 참고하면 됩니다.
 
 ## `/aruco_state` 상태 알림 (연동 규격)
 
