@@ -250,7 +250,7 @@ colcon build --packages-select aruco_go2_docking go2_sport_bridge
 source install/setup.bash
 ```
 
-### 알아두면 좋은 함정 3가지
+### 주요 트러블슈팅 3가지
 
 | 증상 | 원인 / 해결 |
 |---|---|
