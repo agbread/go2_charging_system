@@ -302,23 +302,39 @@ private:
     rclcpp::Time last_cmd_time_;
 };
 
+// int main(int argc, char **argv)
+// {
+//     rclcpp::init(argc, argv);
+//     auto node = std::make_shared<SportModeAdapter>();
+
+//     // ChannelFactory must be initialised before any unitree channel/client.
+//     // NOTE: do NOT pass the network interface here. ROS 2 already runs on
+//     // CycloneDDS (RMW_IMPLEMENTATION=rmw_cyclonedds_cpp) with CYCLONEDDS_URI
+//     // binding domain 0 to the robot NIC (e.g. eth0). Creating the node above
+//     // already opened domain 0, so passing an interface makes the SDK try to
+//     // create domain 0 *explicitly* a second time → CycloneDDS throws
+//     // PreconditionNotMetError ("Failed to create domain explicitly") and the
+//     // process aborts. With an empty interface the SDK just joins the existing
+//     // domain configured by CYCLONEDDS_URI. (network_interface param is kept on
+//     // the node for documentation / launch compatibility but is intentionally
+//     // not forwarded to the SDK.)
+//     unitree::robot::ChannelFactory::Instance()->Init(0);
+//     node->initUnitree();
+
+//     rclcpp::spin(node);
+//     rclcpp::shutdown();
+//     return 0;
+// }
 int main(int argc, char **argv)
 {
+    // 이 SDK 버전은 Init이 항상 도메인을 명시적으로 생성하므로,
+    // rclcpp가 도메인 0을 열기 전에 SDK가 먼저 선점해야 한다.
+    unitree::robot::ChannelFactory::Instance()->Init(0, "eth0");
+
     rclcpp::init(argc, argv);
     auto node = std::make_shared<SportModeAdapter>();
 
-    // ChannelFactory must be initialised before any unitree channel/client.
-    // NOTE: do NOT pass the network interface here. ROS 2 already runs on
-    // CycloneDDS (RMW_IMPLEMENTATION=rmw_cyclonedds_cpp) with CYCLONEDDS_URI
-    // binding domain 0 to the robot NIC (e.g. eth0). Creating the node above
-    // already opened domain 0, so passing an interface makes the SDK try to
-    // create domain 0 *explicitly* a second time → CycloneDDS throws
-    // PreconditionNotMetError ("Failed to create domain explicitly") and the
-    // process aborts. With an empty interface the SDK just joins the existing
-    // domain configured by CYCLONEDDS_URI. (network_interface param is kept on
-    // the node for documentation / launch compatibility but is intentionally
-    // not forwarded to the SDK.)
-    unitree::robot::ChannelFactory::Instance()->Init(0);
+    // unitree::robot::ChannelFactory::Instance()->Init(0);   // ← 이 줄 주석 처리
     node->initUnitree();
 
     rclcpp::spin(node);
