@@ -31,6 +31,8 @@
 
 #include <array>
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -42,6 +44,7 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/string.hpp>
 
+#include <unitree/common/json/json.hpp>
 #include <unitree/robot/channel/channel_factory.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
 #include <unitree/idl/go2/LowState_.hpp>
@@ -302,39 +305,47 @@ private:
     rclcpp::Time last_cmd_time_;
 };
 
-// int main(int argc, char **argv)
-// {
-//     rclcpp::init(argc, argv);
-//     auto node = std::make_shared<SportModeAdapter>();
-
-//     // ChannelFactory must be initialised before any unitree channel/client.
-//     // NOTE: do NOT pass the network interface here. ROS 2 already runs on
-//     // CycloneDDS (RMW_IMPLEMENTATION=rmw_cyclonedds_cpp) with CYCLONEDDS_URI
-//     // binding domain 0 to the robot NIC (e.g. eth0). Creating the node above
-//     // already opened domain 0, so passing an interface makes the SDK try to
-//     // create domain 0 *explicitly* a second time → CycloneDDS throws
-//     // PreconditionNotMetError ("Failed to create domain explicitly") and the
-//     // process aborts. With an empty interface the SDK just joins the existing
-//     // domain configured by CYCLONEDDS_URI. (network_interface param is kept on
-//     // the node for documentation / launch compatibility but is intentionally
-//     // not forwarded to the SDK.)
-//     unitree::robot::ChannelFactory::Instance()->Init(0);
-//     node->initUnitree();
-
-//     rclcpp::spin(node);
-//     rclcpp::shutdown();
-//     return 0;
-// }
 int main(int argc, char **argv)
 {
-    // 이 SDK 버전은 Init이 항상 도메인을 명시적으로 생성하므로,
-    // rclcpp가 도메인 0을 열기 전에 SDK가 먼저 선점해야 한다.
-    unitree::robot::ChannelFactory::Instance()->Init(0, "eth0");
+    // Plan B — config injection, for SDK builds whose ChannelFactory::Init
+    // ALWAYS creates the DDS domain explicitly (newer unitree_sdk2 masters).
+    //
+    // Ordering: the SDK must claim domain 0 BEFORE rclcpp opens it, or the
+    // explicit creation aborts with "Failed to create domain explicitly".
+    // But an explicitly-created domain keeps its creator's config and IGNORES
+    // CYCLONEDDS_URI for every later joiner — so Init(0, "eth0") would strip
+    // the eth0/spdp settings the ROS side needs (that is what forced
+    // ROS_DOMAIN_ID off 0 before). Fix: hand the SDK the SAME config source
+    // as ROS. CYCLONEDDS_URI (e.g. file:///home/x/cyclonedds_eth0.xml) is
+    // passed through DdsParticipantParameter::Config into CycloneDDS, so
+    // domain 0 is born with the correct config and ROS_DOMAIN_ID=0 can share
+    // it. Requires the id="any" (or id="0") xml — domain id stays 0 here.
+    const char *cdds_uri = std::getenv("CYCLONEDDS_URI");
+    if (cdds_uri == nullptr || cdds_uri[0] == '\0') {
+        std::fprintf(stderr,
+            "FATAL: CYCLONEDDS_URI is not set. Plan-B feeds that config to the "
+            "SDK; export it (ONBOARDING step 4) and retry.\n");
+        return 1;
+    }
+    {
+        // Keys per unitree dds_parameter.hpp defines. DomainId/Config are given
+        // both at top level and under "Participant" because the parse location
+        // is undocumented (closed-source impl); the unused copy is ignored.
+        // If Init throws a Json/BadCast exception here, the running SDK expects
+        // a different schema — print of the json below aids fixing it.
+        const std::string json =
+            std::string("{\"DomainId\": 0, \"Config\": \"") + cdds_uri +
+            "\", \"Participant\": {\"DomainId\": 0, \"Config\": \"" +
+            cdds_uri + "\"}}";
+        std::fprintf(stderr, "[plan-b] ChannelFactory::Init json: %s\n",
+                     json.c_str());
+        const unitree::common::Any any = unitree::common::FromJsonString(json);
+        unitree::robot::ChannelFactory::Instance()->Init(
+            unitree::common::AnyCast<unitree::common::JsonMap>(any));
+    }
 
     rclcpp::init(argc, argv);
     auto node = std::make_shared<SportModeAdapter>();
-
-    // unitree::robot::ChannelFactory::Instance()->Init(0);   // ← 이 줄 주석 처리
     node->initUnitree();
 
     rclcpp::spin(node);
