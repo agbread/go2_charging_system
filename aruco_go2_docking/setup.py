@@ -30,11 +30,14 @@ setup(
     maintainer_email='enbang0209@gmail.com',
     description='ArUco docking pipeline for Unitree Go2 in Gazebo',
     license='Apache-2.0',
+    scripts=['scripts/calibrate_go2_front.py'],
     entry_points={
         'console_scripts': [
             'aruco_detector_node = aruco_go2_docking.aruco_detector_node:main',
             'aruco_docking_controller_node = aruco_go2_docking.aruco_docking_controller_node:main',
             'mock_charging_node = aruco_go2_docking.mock_charging_node:main',
+            'go2_front_camera_node = aruco_go2_docking.go2_front_camera_node:main',
+            'aruco_detector_frontcam_node = aruco_go2_docking.aruco_detector_frontcam_node:main',
         ],
     },
 )
