@@ -21,7 +21,7 @@ Unitree **Go2**의 ArUco 마커 기반 **자율 충전(도킹) 시스템**.
 
 | 패키지 | 언어 | 역할 |
 |---|---|---|
-| [`aruco_go2_docking`](aruco_go2_docking/README.md) | Python | 도킹 "두뇌": ArUco 마커 검출 + 도킹 상태머신(접근→정렬→앉기→충전 확인→재시도) + 시뮬용 mock 충전 노드 |
+| [`aruco_go2_docking`](aruco_go2_docking/README.md) | Python | 도킹 "두뇌": ArUco 마커 검출 + 도킹 상태머신(접근→정렬→앉기→충전 확인→재시도) + 시뮬용 mock 충전 노드 + **내장 전면 카메라 지원**(H.264 멀티캐스트 브릿지, 전용 detector, 캘리브레이션 도구) |
 | [`go2_sport_bridge`](go2_sport_bridge/README.md) | C++ | 실제 로봇 어댑터: `/cmd_vel`·`/joy` ↔ SportClient 번역, `rt/lowstate` → `/joint_states`·`/charging_state` |
 
 ## 빠른 실행
@@ -85,6 +85,7 @@ ros2 launch aruco_go2_docking aruco_docking_real.launch.py
 | **[RUN_GUIDE.md](RUN_GUIDE.md)** | **전달용 통합 실행 가이드** — 실행 파일 목록·순서, 파일별 역할, 환경/의존성, 파라미터/옵션 |
 | [ONBOARDING.md](ONBOARDING.md) | 새 PC 설치 절차 (의존성 설치, CycloneDDS/DDS 설정, 트러블슈팅) |
 | [aruco_go2_docking/README.md](aruco_go2_docking/README.md) | 도킹 패키지 상세 (시뮬 중심) |
+| **[aruco_go2_docking/README.md 4-1장](aruco_go2_docking/README.md#4-1-실행--실제-로봇-내장-전면-카메라)** | **내장 전면 카메라 가이드** — 카메라 확인(스냅샷/라이브뷰어/토픽), 캘리브레이션 실행법과 양호 판정 기준(RMS<1.0px), 캘리브레이션 적용 확인, 1m 거리 오차 검증(marker_size 역산), target_distance 확정, 도킹 실행 |
 | [go2_sport_bridge/README.md](go2_sport_bridge/README.md) | sport-mode 어댑터 상세 (번역 테이블, 보정 포인트) |
 | [연동 규격서 PDF](aruco_go2_docking/Unitree%20Go2%20자율%20충전%20상태%20알림%20연동%20규격서.pdf) | `/aruco_state` 연동 규격 원문 |
 
