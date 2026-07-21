@@ -21,8 +21,43 @@ Unitree **Go2**의 ArUco 마커 기반 **자율 충전(도킹) 시스템**.
 
 | 패키지 | 언어 | 역할 |
 |---|---|---|
-| [`aruco_go2_docking`](aruco_go2_docking/README.md) | Python | 도킹 "두뇌": ArUco 마커 검출 + 도킹 상태머신(접근→정렬→앉기→충전 확인→재시도) + 시뮬용 mock 충전 노드 + **내장 전면 카메라 지원**(H.264 멀티캐스트 브릿지, 전용 detector, 캘리브레이션 도구) |
+| `aruco_go2_docking` | Python | 도킹 "두뇌": ArUco 마커 검출 + 도킹 상태머신(접근→정렬→앉기→충전 확인→재시도) + 시뮬용 mock 충전 노드 + **내장 전면 카메라 지원**(H.264 멀티캐스트 브릿지, 전용 detector, 캘리브레이션 도구) |
 | [`go2_sport_bridge`](go2_sport_bridge/README.md) | C++ | 실제 로봇 어댑터: `/cmd_vel`·`/joy` ↔ SportClient 번역, `rt/lowstate` → `/joint_states`·`/charging_state` |
+
+```
+aruco_go2_docking/
+├── aruco_go2_docking/
+│   ├── aruco_detector_node.py          # ArUco 마커 감지 → /aruco/marker_pose (D435i, CameraInfo 토픽)
+│   ├── aruco_detector_frontcam_node.py # 〃 내장 전면 카메라용 — intrinsics를 calib 파일에서 로드
+│   ├── aruco_docking_controller_node.py # 도킹 FSM + /aruco_state 발행
+│   ├── mock_charging_node.py           # 시뮬용: /charging_state 모의 발행
+│   ├── go2_front_camera_node.py        # 내장 카메라 브릿지: H.264 멀티캐스트 → /go2_front/image_raw
+│   ├── go2_front_gst_receiver.py       # 공용 GStreamer 수신 모듈 (nvv4l2decoder HW 디코드)
+│   └── go2_front_calib_io.py           # 캘리브레이션 yaml 로드/저장 공용 모듈
+├── config/
+│   ├── docking_params.yaml             # 시뮬레이션 파라미터
+│   ├── docking_params_real.yaml        # 실제 로봇 파라미터 (D435i)
+│   └── docking_params_frontcam.yaml    # 실제 로봇 파라미터 (내장 전면 카메라, RL/sport 공용)
+├── launch/
+│   ├── aruco_docking.launch.py         # 시뮬: 노드만 (Gazebo 별도 실행 후)
+│   ├── aruco_docking_sim.launch.py     # 시뮬: Gazebo 환경 구성
+│   ├── aruco_docking_real.launch.py    # 실제 로봇 전용 (D435i + RL)
+│   └── aruco_docking_frontcam.launch.py # 실제 로봇 전용 (내장 카메라 + RL)
+├── models/aruco_marker_board/          # Gazebo 마커 모델
+├── scripts/
+│   ├── generate_aruco_marker.py        # 마커 PNG 생성
+│   ├── calibrate_go2_front.py          # 내장 카메라 캘리브레이션 (단독 실행, 헤드리스)
+│   └── go2_front_live_view.py          # 내장 카메라 브라우저 라이브 뷰어 (MJPEG)
+└── worlds/aruco_docking_test.world
+
+go2_sport_bridge/
+├── src/sport_mode_adapter_node.cpp     # /cmd_vel·/joy ↔ SportClient 어댑터
+└── launch/
+    ├── go2_native_docking.launch.py          # 실제 로봇 일괄 실행 (D435i + sport)
+    └── go2_native_docking_frontcam.launch.py # 실제 로봇 일괄 실행 (내장 카메라 + sport)
+
+go2_front_calib.yaml                    # 내장 카메라 캘리브레이션 결과 (RMS 0.689px)
+```
 
 ## 빠른 실행
 
@@ -56,6 +91,16 @@ ros2 launch go2_sport_bridge go2_native_docking.launch.py network_interface:=eth
 > ※ 실제 로봇은 CycloneDDS 환경설정(`RMW_IMPLEMENTATION`, `CYCLONEDDS_URI`)이 필수입니다.
 > 누락 시 어댑터가 `Failed to create domain explicitly`로 즉시 죽습니다 — [ONBOARDING.md](ONBOARDING.md) 4장 참고.
 
+### 실제 로봇 (내장 전면 카메라 — RealSense 불필요)
+
+```bash
+# 최초 1회: 캘리브레이션 (FRONTCAM_GUIDE.md 참고)
+python3 ~/ros2_ws/src/aruco_go2_docking/scripts/calibrate_go2_front.py
+# 도킹 전체 (어댑터 + 카메라 브릿지 + frontcam detector + controller) — 완료 시 자동 종료
+ros2 launch go2_sport_bridge go2_native_docking_frontcam.launch.py network_interface:=eth0
+```
+> 캘리브레이션·검증 절차·파라미터 실측값은 [FRONTCAM_GUIDE.md](FRONTCAM_GUIDE.md) 참고.
+
 ### 실제 로봇 (강화학습 제어기)
 
 ```bash
@@ -83,9 +128,8 @@ ros2 launch aruco_go2_docking aruco_docking_real.launch.py
 | 문서 | 내용 |
 |---|---|
 | **[RUN_GUIDE.md](RUN_GUIDE.md)** | **전달용 통합 실행 가이드** — 실행 파일 목록·순서, 파일별 역할, 환경/의존성, 파라미터/옵션 |
+| **[FRONTCAM_GUIDE.md](FRONTCAM_GUIDE.md)** | **내장 전면 카메라 도킹 가이드** — 카메라 확인(스냅샷/라이브뷰어/토픽), 캘리브레이션 실행법과 양호 판정 기준(RMS<1.0px), 적용 확인, 1m 거리 오차 검증(marker_size 역산), target_distance 확정, 도킹 실행, 실측 확정 파라미터 |
 | [ONBOARDING.md](ONBOARDING.md) | 새 PC 설치 절차 (의존성 설치, CycloneDDS/DDS 설정, 트러블슈팅) |
-| [aruco_go2_docking/README.md](aruco_go2_docking/README.md) | 도킹 패키지 상세 (시뮬 중심) |
-| **[aruco_go2_docking/README.md 4-1장](aruco_go2_docking/README.md#4-1-실행--실제-로봇-내장-전면-카메라)** | **내장 전면 카메라 가이드** — 카메라 확인(스냅샷/라이브뷰어/토픽), 캘리브레이션 실행법과 양호 판정 기준(RMS<1.0px), 캘리브레이션 적용 확인, 1m 거리 오차 검증(marker_size 역산), target_distance 확정, 도킹 실행 |
 | [go2_sport_bridge/README.md](go2_sport_bridge/README.md) | sport-mode 어댑터 상세 (번역 테이블, 보정 포인트) |
 | [연동 규격서 PDF](aruco_go2_docking/Unitree%20Go2%20자율%20충전%20상태%20알림%20연동%20규격서.pdf) | `/aruco_state` 연동 규격 원문 |
 
