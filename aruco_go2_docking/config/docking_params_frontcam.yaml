@@ -64,5 +64,5 @@ aruco_docking_controller_node:
     align_yaw_gain: -1.0               # heading_x에 대한 yaw 게인 (오른쪽으로 더 틀어져서 부호 반전)
     # 포즈 필터 (실기 카메라 노이즈용). 기본 OFF.
     # 접근 중 heading 널뛰기/지그재그 관찰되면: pose_filter_alpha: 0.4, pose_outlier_dist: 0.15 적용
-    pose_filter_alpha: 0.5            # EMA: 1.0=off, 낮출수록 부드러움(지연↑)
+    pose_filter_alpha: 1.0            # EMA: 1.0=off, 낮출수록 부드러움(지연↑)
     pose_outlier_dist: 0.0             # [m] 이보다 큰 점프 프레임 버림; 0=off
