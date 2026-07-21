@@ -66,7 +66,7 @@ class ArucoDetectorFrontcamNode(Node):
         self.declare_parameter('marker_id', 0)
         self.declare_parameter('marker_size', 0.20)
         self.declare_parameter('aruco_dict', 'DICT_4X4_50')
-        self.declare_parameter('image_topic', '/go2_front/image_raw')
+        self.declare_parameter('image_topic', '/go2_camera/image_raw')
         self.declare_parameter('calib_file', calib_io.DEFAULT_CALIB_PATH)
         self.declare_parameter('publish_debug_image', True)
 

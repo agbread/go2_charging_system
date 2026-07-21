@@ -6,7 +6,7 @@
 #   1. sport_mode_adapter_node   (/cmd_vel,/joy ↔ unitree SportClient;
 #                                 rt/lowstate → /joint_states, /charging_state)
 #   2. go2_front_camera_node     (H.264 멀티캐스트 230.1.1.1:1720, nvv4l2decoder
-#                                 → /go2_front/image_raw. CameraInfo 없음)
+#                                 → /go2_camera/image_raw. CameraInfo 없음)
 #   3. aruco_detector_frontcam_node  (intrinsics를 calib 파일에서 로드
 #                                     → /aruco/marker_pose)
 #   4. aruco_docking_controller_node  (the docking state machine, unchanged)

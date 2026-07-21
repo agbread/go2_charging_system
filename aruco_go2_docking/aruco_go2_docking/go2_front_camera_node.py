@@ -5,7 +5,7 @@ go2_front_camera_node
 Bridges the Unitree Go2 built-in front camera (H.264 over UDP multicast,
 230.1.1.1:1720, hardware-decoded via nvv4l2decoder) into ROS.
 
-Publishes /go2_front/image_raw (bgr8) ONLY — no CameraInfo. Intrinsics are
+Publishes /go2_camera/image_raw (bgr8) ONLY — no CameraInfo. Intrinsics are
 not this node's business: aruco_detector_frontcam_node loads them directly
 from the calibration file (~/ros2_ws/src/go2_front_calib.yaml) at startup.
 
@@ -42,7 +42,7 @@ class Go2FrontCameraNode(Node):
         self.network_interface = self.get_parameter('network_interface').value
         self.frame_id = self.get_parameter('frame_id').value
 
-        self.image_pub = self.create_publisher(Image, '/go2_front/image_raw', 10)
+        self.image_pub = self.create_publisher(Image, '/go2_camera/image_raw', 10)
 
         self._last_frame_time = None
 
@@ -56,7 +56,7 @@ class Go2FrontCameraNode(Node):
                    else 'avdec_h264(SW fallback)')
         self.get_logger().info(
             f'Go2 front camera bridge ready — iface={self.network_interface} '
-            f'multicast=230.1.1.1:1720 decoder={decoder} → /go2_front/image_raw')
+            f'multicast=230.1.1.1:1720 decoder={decoder} → /go2_camera/image_raw')
         if not self.receiver.using_hw_decoder:
             self.get_logger().warn(
                 '하드웨어 디코더(nvv4l2decoder) 초기화 실패 — avdec_h264(소프트웨어)로 동작. '
@@ -77,9 +77,6 @@ class Go2FrontCameraNode(Node):
         msg.encoding = 'bgr8'
         msg.is_bigendian = 0
         msg.step = width * 3
-        # 주의: `msg.data = bytes`는 금지 — Foxy rosidl의 uint8[] setter가 bytes를
-        # 원소 단위로 검증해 1280x720 프레임 기준 ~550ms 걸림 (실측). array.array는
-        # setter가 fast-path로 통과시켜 ~0.5ms. 이거 하나로 발행률이 3.6→14.4Hz 됨.
         data = array.array('B')
         data.frombytes(frame_bgr.tobytes())
         msg.data = data

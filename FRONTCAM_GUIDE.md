@@ -30,7 +30,7 @@ python3 ~/ros2_ws/src/aruco_go2_docking/scripts/go2_front_live_view.py
 # 방법 C — ROS 토픽으로 확인
 source ~/ros2_ws/install/setup.bash
 ros2 run aruco_go2_docking go2_front_camera_node
-ros2 topic hz /go2_front/image_raw     # 다른 터미널에서. 기대값 ~14Hz (실측 전달률)
+ros2 topic hz /go2_camera/image_raw    # 다른 터미널에서. 기대값 ~14Hz (실측 전달률)
 ```
 
 수신이 안 되면: 로봇 내부망(eth0) 연결 확인. 스트림 자체 검증은
@@ -142,10 +142,10 @@ ros2 launch aruco_go2_docking aruco_docking_frontcam.launch.py
 
 ```bash
 # 내장 카메라 영상 수신 상태 (기대값 ~14Hz)
-ros2 topic hz /go2_front/image_raw
+ros2 topic hz /go2_camera/image_raw
 
 # 내장 카메라 영상 눈으로 확인
-rqt_image_view /go2_front/image_raw
+rqt_image_view /go2_camera/image_raw
 
 # 상태 알림 (aruco_arrive / aruco_success / aruco_failed)
 ros2 topic echo /aruco_state

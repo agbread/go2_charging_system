@@ -31,7 +31,7 @@ aruco_go2_docking/
 │   ├── aruco_detector_frontcam_node.py # 〃 내장 전면 카메라용 — intrinsics를 calib 파일에서 로드
 │   ├── aruco_docking_controller_node.py # 도킹 FSM + /aruco_state 발행
 │   ├── mock_charging_node.py           # 시뮬용: /charging_state 모의 발행
-│   ├── go2_front_camera_node.py        # 내장 카메라 브릿지: H.264 멀티캐스트 → /go2_front/image_raw
+│   ├── go2_front_camera_node.py        # 내장 카메라 브릿지: H.264 멀티캐스트 → /go2_camera/image_raw
 │   ├── go2_front_gst_receiver.py       # 공용 GStreamer 수신 모듈 (nvv4l2decoder HW 디코드)
 │   └── go2_front_calib_io.py           # 캘리브레이션 yaml 로드/저장 공용 모듈
 ├── config/

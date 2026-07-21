@@ -4,7 +4,7 @@ aruco_detector_frontcam_node:
     marker_id: 0
     marker_size: 0.116           
     aruco_dict: DICT_4X4_50
-    image_topic: /go2_front/image_raw
+    image_topic: /go2_camera/image_raw
     calib_file: ~/ros2_ws/src/go2_front_calib.yaml   # calibrate_go2_front.py 산출물
     publish_debug_image: true
 
