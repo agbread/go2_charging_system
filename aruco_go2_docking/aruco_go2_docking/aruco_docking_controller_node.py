@@ -57,6 +57,10 @@ class ArucoDockingControllerNode(Node):
         # Any non-zero drive command is floored to this to avoid stuttering.
         self.declare_parameter('min_linear_x', 0.15)
         self.declare_parameter('max_angular_z', 0.30)
+        # Heading 정렬용 yaw 최소 명령 바닥 [rad/s]: Go2 데드존(≈0.15 미만 무시) 탓에
+        # heading 오차가 작으면 명령이 데드존 아래로 떨어져 회전이 멈추는 스톨 방지.
+        # 0 = 끄기. SETTLING ROT / DOCKING 근거리 순차정렬에만 적용.
+        self.declare_parameter('min_angular_z', 0.0)
         self.declare_parameter('Kp_linear', 0.5)
         self.declare_parameter('Kp_angular', 1.0)
         self.declare_parameter('goal_tol_dist', 0.05)
@@ -107,6 +111,9 @@ class ArucoDockingControllerNode(Node):
         # If the robot rotates the WRONG way during settling (heading_x grows
         # instead of → 0), set this negative.
         self.declare_parameter('align_yaw_gain', 1.0)
+        # DOCKING: below this |x_m| the approach decouples strafe/yaw (sequential
+        # heading-then-strafe) to stop the near-center fishtail zigzag.
+        self.declare_parameter('docking_yaw_release_lat', 0.10)
         # Pose filter for noisy real-camera marker detection. OFF by default.
         self.declare_parameter('pose_filter_alpha', 1.0)   # EMA: 1.0=off, lower=smoother (more lag)
         self.declare_parameter('pose_outlier_dist', 0.0)   # [m] reject frames jumping > this; 0=off
@@ -133,6 +140,7 @@ class ArucoDockingControllerNode(Node):
         self.max_lin              = self.get_parameter('max_linear_x').value
         self.min_lin              = self.get_parameter('min_linear_x').value
         self.max_ang              = self.get_parameter('max_angular_z').value
+        self.min_ang              = self.get_parameter('min_angular_z').value
         self.kp_lin               = self.get_parameter('Kp_linear').value
         self.kp_ang               = self.get_parameter('Kp_angular').value
         self.tol_dist             = self.get_parameter('goal_tol_dist').value
@@ -160,6 +168,7 @@ class ArucoDockingControllerNode(Node):
         self.heading_tol          = self.get_parameter('heading_tol').value
         self.settle_align_timeout = self.get_parameter('settle_align_timeout_sec').value
         self.align_yaw_gain       = self.get_parameter('align_yaw_gain').value
+        self.yaw_release_lat      = self.get_parameter('docking_yaw_release_lat').value
         self.pose_filter_alpha    = self.get_parameter('pose_filter_alpha').value
         self.pose_outlier_dist    = self.get_parameter('pose_outlier_dist').value
         cmd_vel_topic      = self.get_parameter('cmd_vel_topic').value
@@ -278,18 +287,18 @@ class ArucoDockingControllerNode(Node):
         stable stand, we do not enable walking."""
         elapsed = self._elapsed()
 
-        # ── Phase 0: wait for full sit, then send GetUp (A) ──────────────────
+        # ── Phase 0: wait for full sit, then send GetUp (A → RecoveryStand).
         if not self.standup_sent:
             if self._is_sitting():
                 self.get_logger().info('[FAILED] Full sit confirmed — standing up (A).')
-                self.joy_pub.publish(self._joy(1, 0))  # A → GetUp
+                self.joy_pub.publish(self._joy(1, 0))  # A → RecoveryStand
                 self.standup_sent      = True
                 self.standup_sent_time = self.get_clock().now()
             elif elapsed >= self.sit_confirm_timeout:
                 self.get_logger().warn(
                     f'[FAILED] Full sit not confirmed after {elapsed:.1f}s — '
                     'standing up anyway.')
-                self.joy_pub.publish(self._joy(1, 0))
+                self.joy_pub.publish(self._joy(1, 0))  # A → RecoveryStand
                 self.standup_sent      = True
                 self.standup_sent_time = self.get_clock().now()
             else:
@@ -404,6 +413,15 @@ class ArucoDockingControllerNode(Node):
         self._pose_filt = [fz, fx, fh]
         return fz, fx, fh
 
+    def _yaw_align_cmd(self, heading_x: float) -> float:
+        """Heading 정렬용 yaw 명령. min_angular_z 바닥 적용: 명령이 Go2 데드존
+        아래로 떨어져 tol 바로 밖에서 회전이 멈추는 스톨을 막는다."""
+        w = float(np.clip(-self.align_yaw_gain * heading_x,
+                          -self.max_ang, self.max_ang))
+        if self.min_ang > 0.0 and 0.0 < abs(w) < self.min_ang:
+            w = self.min_ang if w > 0.0 else -self.min_ang
+        return w
+
     def _is_sitting(self) -> bool:
         """True when joint_states confirm the robot is fully in the sit pose."""
         if not self.joint_positions:
@@ -491,10 +509,13 @@ class ArucoDockingControllerNode(Node):
             f'cam_lat={lateral:+.3f}m  heading={heading_deg:+.1f}°',
             throttle_duration_sec=0.5)
 
-        # Arrive already aligned: require both the target range AND being on the
-        # marker centerline (x_m ≈ 0) before handing off to SETTLING.
-        if abs(err) < self.tol_dist and abs(x_m) < self.tol_lat:
-            self.get_logger().info('Target reached (on marker centerline) — settling.')
+        # Arrive already aligned: require target range AND on the marker centerline
+        # (x_m ≈ 0) AND square to the marker normal (heading_x ≈ 0) before handing
+        # off to SETTLING. Without the heading gate the robot can satisfy distance
+        # while yawed ("얼굴만 앞으로") and then sit crooked → charging contacts miss.
+        heading_ok = abs(heading_x) < self.heading_tol
+        if abs(err) < self.tol_dist and abs(x_m) < self.tol_lat and heading_ok:
+            self.get_logger().info('Target reached (centered & square) — settling.')
             self._stop()
             self._enter(State.SETTLING)
             return
@@ -509,16 +530,28 @@ class ArucoDockingControllerNode(Node):
             v = self.kp_lin * err
             cmd.linear.x = (float(np.clip(v, self.min_lin, self.max_lin)) if v >= 0.0
                             else float(np.clip(v, -self.max_lin, -self.min_lin)))
-        # Strafe onto the marker centerline WHILE approaching, so the robot
-        # arrives already aligned instead of squaring up only at the end.
-        # (Same sign convention as SETTLING: x_m>0 ⇒ strafe left.)
-        if abs(x_m) < self.tol_lat:
-            cmd.linear.y = 0.0
-        else:
+        # ③ Decouple strafe vs yaw NEAR the centerline to stop the fishtail zigzag.
+        # FAR (|x_m| ≥ yaw_release_lat): coupled approach is fine — yaw keeps the
+        #   marker in the camera FOV while strafing toward center.
+        # NEAR (|x_m| < yaw_release_lat): sequential like SETTLING — square the
+        #   heading FIRST (no strafe), then strafe to fine-center (no yaw). Never
+        #   both at once, so they can't fight and oscillate.
+        if abs(x_m) >= self.yaw_release_lat:
             vy_mag = float(np.clip(self.kp_lin * abs(x_m), self.min_lin, self.max_lin))
             cmd.linear.y = vy_mag if x_m > 0.0 else -vy_mag
-        # Yaw keeps the marker centered in the camera FOV during the approach.
-        cmd.angular.z = float(np.clip(-self.kp_ang * lateral, -self.max_ang, self.max_ang))
+            cmd.angular.z = float(np.clip(-self.kp_ang * lateral, -self.max_ang, self.max_ang))
+        elif abs(heading_x) >= self.heading_tol:
+            # Phase 1 (near): rotate to square up; hold strafe at 0.
+            cmd.angular.z = self._yaw_align_cmd(heading_x)
+            cmd.linear.y = 0.0
+        else:
+            # Phase 2 (near): heading square → strafe to center; hold yaw at 0.
+            cmd.angular.z = 0.0
+            if abs(x_m) < self.tol_lat:
+                cmd.linear.y = 0.0
+            else:
+                vy_mag = float(np.clip(self.kp_lin * abs(x_m), self.min_lin, self.max_lin))
+                cmd.linear.y = vy_mag if x_m > 0.0 else -vy_mag
 
         self.get_logger().info(
             f'cmd  vx={cmd.linear.x:.2f}  vy={cmd.linear.y:.2f}  w={cmd.angular.z:.2f}',
@@ -593,8 +626,7 @@ class ArucoDockingControllerNode(Node):
         # heading drifts back out it rotates again before resuming the strafe.
         if not heading_ok:
             # Phase 1 — rotate to square up to the marker normal; no strafe yet.
-            cmd.angular.z = float(np.clip(-self.align_yaw_gain * heading_x,
-                                          -self.max_ang, self.max_ang))
+            cmd.angular.z = self._yaw_align_cmd(heading_x)
             cmd.linear.y = 0.0
             phase = 'ROT'
         else:
@@ -754,17 +786,20 @@ class ArucoDockingControllerNode(Node):
     def _retry_standup(self):
         elapsed = self._elapsed()
 
-        # ── Phase 0: wait for robot to be fully sitting, then send GetUp ─────
+        # ── Phase 0: wait for robot to be fully sitting, then send GetUp.
+        # Uses A → RecoveryStand: StandUp leaves the robot in a pose where
+        # locomotion/Move won't engage (it stands but won't walk/back up), so
+        # RecoveryStand is required here to reach a locomotion-ready state.
         if not self.standup_sent:
             if self._is_sitting():
                 self.get_logger().info('Full sit confirmed — sending GetUp (A).')
-                self.joy_pub.publish(self._joy(1, 0))  # A → GetUp
+                self.joy_pub.publish(self._joy(1, 0))  # A → RecoveryStand
                 self.standup_sent      = True
                 self.standup_sent_time = self.get_clock().now()
             elif elapsed >= self.sit_confirm_timeout:
                 self.get_logger().warn(
                     f'Full sit not confirmed after {elapsed:.1f}s — sending GetUp anyway.')
-                self.joy_pub.publish(self._joy(1, 0))
+                self.joy_pub.publish(self._joy(1, 0))  # A → RecoveryStand
                 self.standup_sent      = True
                 self.standup_sent_time = self.get_clock().now()
             else:

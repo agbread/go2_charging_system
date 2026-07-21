@@ -1,28 +1,36 @@
-aruco_detector_node:
+
+aruco_detector_frontcam_node:
   ros__parameters:
     marker_id: 0
-    marker_size: 0.173            # physical side length [m] (A4 출력 기준)
+    marker_size: 0.116           
     aruco_dict: DICT_4X4_50
-    # ── SIM 전용 토픽 (실기는 /camera/color/...). 이것만 real과 다름. ──
-    image_topic: /color/image_raw
-    camera_info_topic: /color/camera_info
+    image_topic: /go2_front/image_raw
+    calib_file: ~/ros2_ws/src/go2_front_calib.yaml   # calibrate_go2_front.py 산출물
     publish_debug_image: true
 
 aruco_docking_controller_node:
   ros__parameters:
-    target_distance: 0.665       # base_link x 기준 정지 거리 [m] (base_link→marker, x방향)
-    camera_offset_x: 0.345       # base_link→카메라 전방(x) 오프셋 [m]; bl_x = 0.345 + tvec.z
+    target_distance: 0.675       # base_link x 기준 정지 거리 [m]. ★ 최종값은 검증 3에서 확정:
+                                  #   로봇을 패드 정위치에 수동으로 세우고 controller 로그의 z_m을 입력
+    camera_offset_x: 0.333       # base_link 원점→내장 카메라 렌즈 전방거리 [m], 실측값.
+                                  #   측정 기준: base_link 원점 = 앞/뒤 hip 회전축의 정중앙 
+                                  #   (공식 URDF:앞 hip x=+0.1934) → 앞 hip 축→렌즈 수평거리 + 0.1934로 측정.
     camera_offset_y: 0.0         # base_link→카메라 좌(+)/우(-) 오프셋 [m]; bl_y = 0.0 - tvec.x
-    camera_pitch_deg: 0.0        # 카메라 아래 기울기 [deg], +가 nose-down (0=지금과 동일)
-    max_linear_x: 0.20
+    camera_pitch_deg: 0.0        # 카메라 아래 기울기 [deg], +가 nose-down.
+
+    max_linear_x: 0.25
     min_linear_x: 0.20         # 최소 전진/후진 속도: Go2 데드존(≈0.15 미만은 안 움직임) 보정
-    max_angular_z: 0.30
-    min_angular_z: 0.0         # heading 정렬 yaw 최소 명령 바닥. 시뮬레이션은 데드존 없음 → 끔
+    max_angular_z: 0.20        # ④ 겹침 진동 완화 위해 하향 (was 0.30)
+    min_angular_z: 0.1        # heading 정렬 yaw 최소 명령: 데드존(≈0.15) 아래 스톨 방지. 0=끄기
     Kp_linear: 0.50
-    Kp_angular: 1.00
+    Kp_angular: 0.70           # ④ yaw 게인 하향 (was 1.00)
     goal_tol_dist: 0.03
-    goal_tol_lateral: 0.03
-    marker_timeout_sec: 0.50
+    goal_tol_lateral: 0.06     # ① strafe 진동(지그재그) 완화 위해 넓힘 (was 0.03)
+    # ③ DOCKING 중심 근처(|x_m|<이 값)에선 strafe/yaw를 동시에 안 하고 순차 정렬 → fishtail 방지
+    docking_yaw_release_lat: 0.10
+    marker_timeout_sec: 0.50   # 내장 카메라 실측 전달률 ~14.4fps(프레임 간격 ~70ms) 기준
+                               # 0.5s = 7프레임 여유 → 유지. "Marker lost" 스팸이 잦으면
+                               # H.264 지연 영향 가능성 → 0.7 상향 검토
     cmd_vel_topic: /cmd_vel
     marker_pose_topic: /aruco/marker_pose
     sit_on_arrival: true
@@ -41,7 +49,7 @@ aruco_docking_controller_node:
     backup_start_delay_sec: 4.0        # (재시도 로직에서 미사용; 호환성 위해 유지)
     backup_speed: 0.20                 # 후진 속도 [m/s] (데드존 위로 올림)
     backup_max_sec: 15.0               # 마커 미발견 시 최대 후진 시간 [s]
-    enable_charging_check: true    # use mock_charging_node to simulate
+    enable_charging_check: true
     # Sit detection via /joint_states
     joint_states_topic: /joint_states
     sit_thigh_target: 1.36             # [rad] go2 sit pose (animation target)
@@ -51,9 +59,10 @@ aruco_docking_controller_node:
     stand_calf_target: -1.50           # [rad] 일어섰을 때 calf 각도
     stand_calf_tolerance: 0.50         # [rad]
     # Heading alignment before sit (SETTLING) — 마커 normal과 base_link x축 일직선으로 앉기
-    heading_tol: 0.12                  # |R[0,2]| 임계값 (~6.9°); 이내면 heading 평행으로 간주
+    heading_tol: 0.14                 # |R[0,2]| 임계값 (~6.9°); 이내면 heading 평행으로 간주
     settle_align_timeout_sec: 5.0      # settle_delay 이후 정렬에 허용하는 추가 시간 [s]
     align_yaw_gain: -1.0               # heading_x에 대한 yaw 게인 (오른쪽으로 더 틀어져서 부호 반전)
-    # 포즈 필터 (실기 카메라 노이즈용). 기본 OFF — 지터 심하면 켜기.
-    pose_filter_alpha: 1.0             # EMA: 1.0=off, 낮출수록 부드러움(지연↑). 예) 0.3
-    pose_outlier_dist: 0.0             # [m] 이보다 큰 점프 프레임 버림; 0=off. 예) 0.15
+    # 포즈 필터 (실기 카메라 노이즈용). 기본 OFF.
+    # 접근 중 heading 널뛰기/지그재그 관찰되면: pose_filter_alpha: 0.4, pose_outlier_dist: 0.15 적용
+    pose_filter_alpha: 0.5            # EMA: 1.0=off, 낮출수록 부드러움(지연↑)
+    pose_outlier_dist: 0.0             # [m] 이보다 큰 점프 프레임 버림; 0=off
