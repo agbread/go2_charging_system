@@ -1,7 +1,6 @@
 # Go2 NATIVE (sport-mode) ArUco docking — BUILT-IN front camera version.
-# (go2_native_docking.launch.py 기반. detector가 frontcam 전용 노드로 교체되고
-#  내장 카메라 브릿지가 추가된 것만 다름. D435i 경로는 기존 launch 그대로 보존.)
-#
+
+
 # Brings up:
 #   1. sport_mode_adapter_node   (/cmd_vel,/joy ↔ unitree SportClient;
 #                                 rt/lowstate → /joint_states, /charging_state)
@@ -36,11 +35,6 @@ def generate_launch_description():
         'config', 'docking_params_frontcam.yaml')
 
     net_if = LaunchConfiguration('network_interface')
-
-    # ── Pin the right CycloneDDS core (fixes SIGSEGV/abort, exit -11) ─────────
-    # go2_native_docking.launch.py와 동일한 픽스 — sport_mode_adapter_node는
-    # cyclonedds_ws의 libddsc가 /usr/local 것보다 LD_LIBRARY_PATH에서 앞서야
-    # 기동 시 크래시하지 않는다. 상세 설명은 원본 launch 참고.
     cdds_lib = os.path.expanduser('~/cyclonedds_ws/install/cyclonedds/lib')
     ld_fix = SetEnvironmentVariable(
         'LD_LIBRARY_PATH',
