@@ -1,14 +1,17 @@
 # Go2 내장 전면 카메라 도킹 가이드
 
-D435i 대신 **Go2 내장 전면 카메라**(H.264 UDP 멀티캐스트 230.1.1.1:1720, Jetson
-하드웨어 디코드)로 ArUco 도킹을 수행하는 경로의 실행·캘리브레이션·검증 가이드.
+**Go2 내장 전면 카메라**로 0ArUco 도킹을 수행하는 모드의 실행·캘리브레이션·검증 가이드.
 
-- 기존 노드(detector/controller/adapter)와 D435i 경로는 수정 없이 병행 운용됩니다.
 - 카메라가 CameraInfo(intrinsics)를 제공하지 않으므로, **frontcam 전용 detector**가
   캘리브레이션 파일(`~/ros2_ws/src/go2_front_calib.yaml`)을 시작 시 직접 로드합니다.
 - 진행 순서: **최초 1회 캘리브레이션 → 검증 → 도킹**. 캘리브레이션은 매 실행이 아니라
   최초 1회(로봇 교체 시 재실행)만 하면 되고, detector가 실행될 때마다 파일을 읽으므로
   별도 반영 절차가 없습니다.
+
+## Repo Pull 
+```bash
+cd ~/ros2_ws/src/go2_charging_system
+git 
 
 ## 빌드
 
