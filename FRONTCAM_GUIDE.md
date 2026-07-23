@@ -14,12 +14,15 @@ cd ~/ros2_ws/src/go2_charging_system
 git fetch origin
 git reset --hard origin/main
 ```
+
 ## frontcam 의존성 — 있으면 skip 되므로 그냥 전부
+```bash
 sudo apt install -y \
   python3-gi python3-gst-1.0 gir1.2-gstreamer-1.0 \
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-tools \
   python3-yaml
+```
 
 ## 빌드
 
