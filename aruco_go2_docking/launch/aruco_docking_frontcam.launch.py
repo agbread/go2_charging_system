@@ -1,15 +1,3 @@
-# Real Go2 — ArUco docking with the BUILT-IN front camera, RL locomotion.
-# (aruco_docking_real.launch.py 기반. detector가 frontcam 전용 노드로 교체되고
-#  내장 카메라 브릿지가 추가된 것만 다름. D435i 경로는 기존 launch 그대로 보존.)
-#
-# Prerequisites (run before this launch):
-#   1. rl_sar real Go2:  ros2 run rl_sar rl_real_go2_ros
-#   2. (권장, 최초 1회) 캘리브레이션: python3 scripts/calibrate_go2_front.py
-#      — 없으면 detector가 스펙 근사 intrinsics로 동작 (WARN)
-#
-# Usage:
-#   ros2 launch aruco_go2_docking aruco_docking_frontcam.launch.py network_interface:=eth0
-
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
