@@ -11,7 +11,15 @@
 ## Repo Pull 
 ```bash
 cd ~/ros2_ws/src/go2_charging_system
-git 
+git fetch origin
+git reset --hard origin/main
+```
+## frontcam 의존성 — 있으면 skip 되므로 그냥 전부
+sudo apt install -y \
+  python3-gi python3-gst-1.0 gir1.2-gstreamer-1.0 \
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-tools \
+  python3-yaml
 
 ## 빌드
 
@@ -27,23 +35,19 @@ source install/setup.bash
 # 방법 A — 스냅샷 1장 저장 (헤드리스): 방향/화질/구도 확인
 python3 ~/ros2_ws/src/aruco_go2_docking/scripts/calibrate_go2_front.py --snapshot ~/ros2_ws/src/front_check.jpg
 
-# 방법 B — 브라우저 실시간 뷰어: 같은 와이파이의 노트북/폰에서 http://<젯슨IP>:8080
+# 방법 B — 브라우저 실시간 뷰어: 같은 와이파이의 노트북/폰에서 http://<젯슨IP>:8080(코드 실행 시 로그에 나오는 링크로 접속)
 python3 ~/ros2_ws/src/aruco_go2_docking/scripts/go2_front_live_view.py
 
 # 방법 C — ROS 토픽으로 확인
 source ~/ros2_ws/install/setup.bash
 ros2 run aruco_go2_docking go2_front_camera_node
-ros2 topic hz /go2_camera/image_raw    # 다른 터미널에서. 기대값 ~14Hz (실측 전달률)
+ros2 topic hz /go2_camera/image_raw    # 주기: 약 14Hz 
 ```
-
-수신이 안 되면: 로봇 내부망(eth0) 연결 확인. 스트림 자체 검증은
-`gst-launch-1.0 udpsrc address=230.1.1.1 port=1720 multicast-iface=eth0 ! application/x-rtp, media=video, encoding-name=H264 ! rtph264depay ! h264parse ! nvv4l2decoder ! fakesink`
 
 ## 1. 캘리브레이션 (최초 1회, 로봇 교체 시 재실행)
 
-준비물: **100% 배율로 인쇄한** 체커보드 (기본값: Mark Hedley Jones A4, 25mm 칸,
-10x7 내부코너). 인쇄 후 자로 4칸=100mm 검증 — 다르면 실측 칸 길이를 `--square`로 입력.
-판판한 하드보드에 들뜸 없이 부착. 로봇은 세워두고(가만히), 사람이 보드를 들고 움직인다.
+준비물: **100% 배율로 인쇄한** 체커보드 (기본값: Mark Hedley Jones A4, 25mm 칸,10x7 내부코너 / https://markhedleyjones.com/projects/calibration-checkerboard-collection 참고). 
+판판하고 두꺼운 판에 들뜸 없이 부착. 로봇은 세워두고(가만히), 사람이 보드를 들고 움직인다.
 
 ```bash
 python3 ~/ros2_ws/src/aruco_go2_docking/scripts/calibrate_go2_front.py                 # 기본 30장
@@ -94,19 +98,18 @@ ArUco frontcam detector ready  marker_id=0 size=0.116m ...          ← marker_s
 ## 3. 거리 오차 검증 (마커 1m 테스트)
 
 1. ArUco 마커(DICT_4X4_50, ID=0 — 충전 패드에 쓰는 그 마커)를 **카메라 렌즈에서
-   줄자로 1m** 위치에 정면으로 세운다 (높이는 카메라 높이와 비슷하게).
+   줄자로 1m** 위치에 정면으로 세운다 (높이는 카메라 높이와 비슷하게 / ArUco 마커 윗면이 바닥으로부터 45~47cm 높이에 오도록).
 2. 2장의 두 노드를 띄우고 터미널 2의 로그를 본다:
 
 ```
 Detected ID=0  dist=1.0XXm  lateral=...
 ```
 
-3. **dist가 실측 거리의 ±2~3% 이내면 통과.** 오차가 그보다 크면 대부분 마커 인쇄
-   크기 문제 — 자로 마커 한 변(검은 테두리 기준)을 재고, 아래로 역산해
-   `config/docking_params_frontcam.yaml`의 `marker_size`를 실측값으로 교체:
-
+3. **dist가 실측 거리의 ±2~3% 이내면 통과.**
+   오차가 그보다 크면 대부분 마커 인쇄크기 문제일 수 있음
+   — 자로 마커 한 변 길이를 재고 `config/docking_params_frontcam.yaml`의 `marker_size`를 실측값으로 교체 후 재확인
 ```
-실제 marker_size = 설정값 × (실측 거리 / dist 표시값)
+역산하는 방법: 실제 marker_size = 설정값 × (실측 거리 / dist 표시값)
 예) 설정 0.12, 실측 0.98m인데 dist=1.013 → 0.12 × 0.98/1.013 ≈ 0.116
 ```
 
