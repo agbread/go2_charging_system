@@ -91,7 +91,7 @@ ros2 launch go2_sport_bridge go2_native_docking.launch.py network_interface:=eth
 > ※ 실제 로봇은 CycloneDDS 환경설정(`RMW_IMPLEMENTATION`, `CYCLONEDDS_URI`)이 필수입니다.
 > 누락 시 어댑터가 `Failed to create domain explicitly`로 즉시 죽습니다 — [ONBOARDING.md](ONBOARDING.md) 4장 참고.
 
-### 실제 로봇 (내장 전면 카메라 — RealSense 불필요)
+### 실제 로봇 (Go2 내장 sport-mode 제어기 / 내장 전면 카메라)
 
 ```bash
 # 최초 1회: 캘리브레이션 (FRONTCAM_GUIDE.md 참고)
