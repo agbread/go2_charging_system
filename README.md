@@ -128,7 +128,7 @@ ros2 launch aruco_go2_docking aruco_docking_real.launch.py
 | 문서 | 내용 |
 |---|---|
 | [RUN_GUIDE.md](RUN_GUIDE.md) | 전달용 통합 실행 가이드 — 실행 파일 목록·순서, 파일별 역할, 환경/의존성, 파라미터/옵션 |
-| [FRONTCAM_GUIDE.md](FRONTCAM_GUIDE.md) | 내장 전면 카메라 도킹 가이드 — 내장 카메라 확인, 캘리브레이션, 거리 오자 검증, 도킹 |
+| [FRONTCAM_GUIDE.md](FRONTCAM_GUIDE.md) | 내장 전면 카메라 도킹 가이드 — 내장 카메라 확인, 캘리브레이션, 거리 오차 검증 |
 | [ONBOARDING.md](ONBOARDING.md) | 새 PC 설치 절차 (의존성 설치, CycloneDDS/DDS 설정, 트러블슈팅) |
 | [go2_sport_bridge/README.md](go2_sport_bridge/README.md) | sport-mode 어댑터 상세 (번역 테이블, 보정 포인트) |
 | [연동 규격서 PDF](aruco_go2_docking/Unitree%20Go2%20자율%20충전%20상태%20알림%20연동%20규격서.pdf) | `/aruco_state` 연동 규격 원문 |
