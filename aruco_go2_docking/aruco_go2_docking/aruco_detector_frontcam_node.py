@@ -1,18 +1,4 @@
 #!/usr/bin/env python3
-"""
-aruco_detector_frontcam_node
------------------------------
-aruco_detector_node.py 복사본 — 차이는 intrinsics를 CameraInfo 토픽 대신
-calib 파일(~/ros2_ws/src/go2_front_calib.yaml)에서 시작 시 1회 로드하는 것뿐.
-원본(aruco_detector_node.py) 수정 시 여기도 반영할 것.
-
-Go2 내장 전면 카메라는 CameraInfo를 제공하지 않으므로, 이 노드는
-`calib_file` 파라미터의 YAML(scripts/calibrate_go2_front.py 산출물)에서
-camera_matrix/dist_coeffs를 직접 읽는다. 파일이 없으면 스펙 근사값으로
-동작한다 (WARN — 중앙부만 유효, 캘리브레이션 권장).
-
-검출/solvePnP//aruco/marker_pose 발행/debug image는 원본과 동일.
-"""
 
 import numpy as np
 import cv2
